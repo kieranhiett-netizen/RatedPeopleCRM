@@ -1,0 +1,3 @@
+ratedpeople.duckdns.org {
+    reverse_proxy espocrm:80
+}
