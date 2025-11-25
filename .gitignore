@@ -1,0 +1,7 @@
+# docker volumes & runtime
+espocrm-docker/caddy_data/
+espocrm-docker/caddy_config/
+espocrm-backups/
+espocrm-docker/app-html/
+*.tar.gz
+tmp/
