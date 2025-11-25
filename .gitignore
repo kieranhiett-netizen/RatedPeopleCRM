@@ -1,4 +1,3 @@
-# docker volumes & runtime
 espocrm-docker/caddy_data/
 espocrm-docker/caddy_config/
 espocrm-backups/
