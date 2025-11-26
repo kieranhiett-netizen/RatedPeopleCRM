@@ -2,11 +2,22 @@
 
 namespace Espo\Custom\Controllers;
 
+use Espo\Core\Api\Request;
+use Espo\Core\Api\Response;
+use Espo\ORM\EntityManager;
+
 class AccountSubscription extends \Espo\Core\Controllers\Base
 {
-    public function getActionRead($params, $data, $request)
+    private EntityManager $entityManager;
+    
+    public function __construct(EntityManager $entityManager)
     {
-        $accountId = $params['id'] ?? null;
+        $this->entityManager = $entityManager;
+    }
+    
+    public function getActionRead(Request $request, Response $response): array
+    {
+        $accountId = $request->getRouteParam('id');
         
         if (!$accountId) {
             return [
@@ -16,10 +27,8 @@ class AccountSubscription extends \Espo\Core\Controllers\Base
         }
         
         try {
-            // Get PDO connection from Espo's entity manager
-            $pdo = $this->getEntityManager()->getPDO();
+            $pdo = $this->entityManager->getPDO();
             
-            // Query the c_subscription table
             $sql = "SELECT * FROM c_subscription WHERE account_id = :accountId";
             $stmt = $pdo->prepare($sql);
             $stmt->execute(['accountId' => $accountId]);
