@@ -1,0 +1,14 @@
+{
+  "sidePanels": {
+    "detail": [
+      "__APPEND__",
+      {
+        "name": "subscriptionsLive",
+        "label": "Live Subscriptions",
+        "view": "custom:views/account/panels/subscriptions-live",
+        "aclScope": "Account",
+        "acl": "read"
+      }
+    ]
+  }
+}
