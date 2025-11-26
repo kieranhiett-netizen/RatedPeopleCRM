@@ -1,0 +1,14 @@
+{
+    "recordViews": {
+      "detail": {
+        "panels": [
+          {
+            "name": "subscriptionsLive",
+            "label": "Live Subscriptions",
+            "view": "custom:views/account/record/panels/subscriptions-live"
+          }
+        ]
+      }
+    }
+  }
+  
