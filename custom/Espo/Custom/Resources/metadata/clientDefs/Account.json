@@ -1,0 +1,13 @@
+{
+    "bottomPanels": {
+        "detail": [
+            "__APPEND__",
+            {
+                "name": "subscriptions",
+                "label": "Subscriptions",
+                "view": "custom:views/account/record/panels/subscriptions",
+                "style": "info"
+            }
+        ]
+    }
+}

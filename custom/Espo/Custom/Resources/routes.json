@@ -1,0 +1,10 @@
+[
+    {
+        "route": "/AccountSubscription/:id",
+        "method": "get",
+        "params": {
+            "controller": "Espo\\\\Custom\\\\Controllers\\\\AccountSubscription",
+            "action": "read"
+        }
+    }
+]
