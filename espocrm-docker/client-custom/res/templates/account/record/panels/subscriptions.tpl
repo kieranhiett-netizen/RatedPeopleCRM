@@ -19,6 +19,9 @@
                             <tr>
                                 <th>ID</th>
                                 <th>Name</th>
+                                <th>Plan Code</th>
+                                <th>Start Date</th>
+                                <th>End Date</th>
                                 <th>Status</th>
                                 <th>Created</th>
                                 <th>Modified</th>
@@ -29,6 +32,9 @@
                                 <tr>
                                     <td>{{id}}</td>
                                     <td>{{name}}</td>
+                                    <td>{{plan_code}}</td>
+                                    <td>{{start_date}}</td>
+                                    <td>{{end_date}}</td>
                                     <td>{{status}}</td>
                                     <td>{{created_at}}</td>
                                     <td>{{modified_at}}</td>
