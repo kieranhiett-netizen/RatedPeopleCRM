@@ -40,6 +40,12 @@
             "maxLength": 100,
             "options": [],
             "isCustom": true
+        },
+        "planName": {
+            "type": "varchar",
+            "maxLength": 100,
+            "options": [],
+            "isCustom": true
         }
     },
     "links": {
