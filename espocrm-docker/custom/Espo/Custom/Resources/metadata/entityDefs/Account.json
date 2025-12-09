@@ -1,0 +1,19 @@
+{
+    "fields": {
+        "cUserId": {
+            "type": "varchar",
+            "maxLength": 100,
+            "options": [],
+            "isCustom": true
+        }
+    },
+    "links": {
+        "cSubscriptions": {
+            "type": "hasMany",
+            "foreign": "account",
+            "entity": "CSubscription",
+            "audited": false,
+            "isCustom": true
+        }
+    }
+}

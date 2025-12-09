@@ -1,0 +1,20 @@
+{
+    "fields": {
+        "planType": "PlanType",
+        "account": "Account",
+        "startDate": "StartDate",
+        "endDate": "EndDate"
+    },
+    "links": {
+        "account": "Account"
+    },
+    "labels": {
+        "Create CSubscription": "Create Subscription"
+    },
+    "options": {
+        "planType": {
+            "QPQ - £150": "QPQ - £150",
+            "QPQ - £200": "QPQ - £200"
+        }
+    }
+}

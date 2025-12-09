@@ -1,0 +1,10 @@
+{
+    "scopeNames": {
+        "CSubscription": "Subscription",
+        "CSubscriptionPlan": "SubscriptionPlan"
+    },
+    "scopeNamesPlural": {
+        "CSubscription": "Subscriptions",
+        "CSubscriptionPlan": "SubscriptionPlans"
+    }
+}

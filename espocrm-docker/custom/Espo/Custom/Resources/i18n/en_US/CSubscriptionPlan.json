@@ -1,0 +1,9 @@
+{
+    "fields": {
+        "planCode": "PlanCode"
+    },
+    "links": [],
+    "labels": {
+        "Create CSubscriptionPlan": "Create SubscriptionPlan"
+    }
+}

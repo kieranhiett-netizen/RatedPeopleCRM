@@ -1,0 +1,17 @@
+{
+    "fields": {
+        "planType": "PlanType",
+        "account": "Account",
+        "startDate": "StartDate",
+        "endDate": "EndDate"
+    },
+    "options": {
+        "planType": {
+            "QPQ - £150": "QPQ - £150",
+            "QPQ - £200": "QPQ - £200"
+        }
+    },
+    "links": {
+        "account": "Account"
+    }
+}
