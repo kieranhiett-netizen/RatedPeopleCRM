@@ -69,63 +69,57 @@ define('custom:views/account/record/panels/subscriptions', ['views/record/panels
 
             this.loadSubscriptions();
         },
-
         loadSubscriptions: function () {
             const accountId = this.model.id;
-
-            if (!accountId) {
+            const zuoraAccountId = this.model.get('cZuoraAccountId') || null;
+        
+            if (!accountId && !zuoraAccountId) {
                 this.loading = false;
+                this.error = 'No Account or Zuora Account ID.';
+                this.reRender();
                 return;
             }
-
-            Espo.Ajax.getRequest(`AccountSubscription/${accountId}`)
+        
+            this.loading = true;
+            this.error = null;
+            this.reRender();
+        
+            Espo.Ajax.postRequest('ZuoraSubscription/action/list', {
+                accountId: accountId,
+                zuoraAccountId: zuoraAccountId
+            })
                 .then(response => {
+                    console.log('ZuoraSubscription list response:', response);
+        
                     this.loading = false;
-
-                    // If backend sent an error, surface it in the panel
-                    if (response && response.error) {
-                        const msg = response.message
-                            ? response.error + ': ' + response.message
-                            : response.error;
-
-                        this.error = msg;
-                        this.subscriptions = [];
-                        this.activeSubscriptions = [];
-                        this.previousSubscriptions = [];
-                        this.reRender();
-                        return;
-                    }
-
-                    this.error = null;
-                    this.subscriptions = (response && response.subscriptions) || [];
-
-                    // Split into active and previous
+        
+                    // use what the controller returns
+                    this.subscriptions = response.subscriptions || [];
+        
                     const now = new Date();
-
+        
                     this.activeSubscriptions = this.subscriptions.filter(sub => {
-                        // Active if: status is "Active" OR end_date is in the future/null
                         if (sub.status === 'Active') return true;
                         if (!sub.end_date) return true;
-
+        
                         const endDate = new Date(sub.end_date);
                         return endDate >= now;
                     });
-
+        
                     this.previousSubscriptions = this.subscriptions.filter(sub => {
-                        // Previous if: status is not "Active" AND end_date is in the past
                         if (sub.status === 'Active') return false;
                         if (!sub.end_date) return false;
-
+        
                         const endDate = new Date(sub.end_date);
                         return endDate < now;
                     });
-
+        
                     this.reRender();
                 })
                 .catch(error => {
+                    console.error('Zuora subscription fetch failed:', error);
                     this.loading = false;
-                    this.error = 'Failed to load subscriptions';
-                    console.error('Subscription load error:', error);
+                    this.error = 'Failed to load subscriptions from Zuora';
                     this.reRender();
                 });
         },
