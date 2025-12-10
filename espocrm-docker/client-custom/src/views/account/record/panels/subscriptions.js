@@ -17,20 +17,7 @@ define('custom:views/account/record/panels/subscriptions', ['views/record/panels
                     .map(s => s.zuora_subscription_id)
                     .filter(Boolean);
 
-                const newPlanId = window.prompt('Enter new plan ID (applies to whole subscription):');
-                if (!newPlanId) {
-                    return;
-                }
-
-                const useNextBilling = window.confirm('Apply at next billing cycle? (OK = Yes, Cancel = Immediate)');
-                const effectivePolicy = useNextBilling ? 'NextBillingPeriod' : 'Immediate';
-
-                this.executeAction('change', {
-                    subscriptionIds: subscriptionIds,
-                    zuoraSubscriptionIds: zuoraSubscriptionIds,
-                    planId: newPlanId,
-                    effectivePolicy: effectivePolicy
-                });
+                this.openPlanSelectDialog(subscriptionIds, zuoraSubscriptionIds);
             },
 
             'click .action-cancel-subscription-panel': function (e) {
@@ -45,7 +32,7 @@ define('custom:views/account/record/panels/subscriptions', ['views/record/panels
                     .filter(Boolean);
 
                 const atRenewal = window.confirm(
-                    'Cancel at renewal? (OK = cancel at renewal, Cancel = cancel at next payment date)'
+                    'Cancel at renewal?\n\nOK = cancel at renewal\nCancel = cancel at next payment date'
                 );
                 const cancelPolicy = atRenewal ? 'EndOfTerm' : 'NextPayment';
 
@@ -127,6 +114,36 @@ define('custom:views/account/record/panels/subscriptions', ['views/record/panels
                 });
         },
 
+        openPlanSelectDialog: function (subscriptionIds, zuoraSubscriptionIds) {
+            const scope = 'CSubscriptionPlan';
+
+            this.createView('selectPlan', 'views/modals/select-record', {
+                scope: scope,
+                multiple: false
+            }, function (view) {
+                view.render();
+
+                // Fired when user selects a plan from the list
+                this.listenToOnce(view, 'select', function (model) {
+                    const planId = model.id;
+                    const planCode = model.get('planCode') || model.get('plan_code') || null;
+
+                    const useNextBilling = window.confirm(
+                        'Apply plan change at next billing cycle?\n\nOK = Next billing\nCancel = Immediate'
+                    );
+                    const effectivePolicy = useNextBilling ? 'NextBillingPeriod' : 'Immediate';
+
+                    this.executeAction('change', {
+                        subscriptionIds: subscriptionIds,
+                        zuoraSubscriptionIds: zuoraSubscriptionIds,
+                        planId: planId,
+                        planCode: planCode,
+                        effectivePolicy: effectivePolicy
+                    });
+                }, this);
+            }.bind(this));
+        },
+        
         // Calls ZuoraSubscription controller – now sending arrays
         executeAction: function (action, payload) {
             const accountId = this.model.id;
