@@ -11,9 +11,10 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
         if (!$this->getAcl()->checkScope('Account', 'edit')) {
             throw new Forbidden();
         }
-    
+
         return true;
     }
+
     /**
      * Change subscription(s) – STUB ONLY
      * Called by POST /api/v1/ZuoraSubscription/action/change
@@ -34,7 +35,7 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
         if (empty($subscriptionIds)) {
             return [
                 'success' => false,
-                'message' => 'No subscriptionIds provided from client.'
+                'message' => 'No subscriptionIds provided from client.',
             ];
         }
 
@@ -89,7 +90,7 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
         if (empty($subscriptionIds)) {
             return [
                 'success' => false,
-                'message' => 'No subscriptionIds provided from client.'
+                'message' => 'No subscriptionIds provided from client.',
             ];
         }
 
@@ -119,6 +120,72 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
                 'accountId'            => $accountId,
                 'zuoraAccountId'       => $zuoraAccountId,
             ],
+        ];
+    }
+
+    /**
+     * Fetch subscription(s) from Zuora – STUB ONLY
+     * Called by POST /api/v1/ZuoraSubscription/action/list
+     */
+    public function postActionList($params, $data, $request): array
+    {
+        $this->checkAccess();
+
+        $accountId      = $data->accountId      ?? null;
+        $zuoraAccountId = $data->zuoraAccountId ?? null;
+
+        // If neither accountId nor zuoraAccountId was provided:
+        if (!$accountId && !$zuoraAccountId) {
+            return [
+                'success'       => true,
+                'subscriptions' => [],
+                'message'       => 'No identifiers provided; skipping Zuora fetch.',
+            ];
+        }
+
+        // If we have accountId but no Zuora ID — pull it from the Account entity
+        if (!$zuoraAccountId && $accountId) {
+
+            $entityManager = $this->getEntityManager();
+            $account = $entityManager->getEntity('Account', $accountId);
+
+            if (!$account) {
+                return [
+                    'success' => false,
+                    'message' => 'Account not found for id ' . $accountId,
+                ];
+            }
+
+            // Espo exposes DB column "c_zuoraaccount_id" as "cZuoraAccountId"
+            $zuoraAccountId = $account->get('cZuoraAccountId');
+
+            if (!$zuoraAccountId) {
+                return [
+                    'success'       => true,
+                    'subscriptions' => [],
+                    'message'       => 'Account has no cZuoraAccountId; nothing to fetch.',
+                ];
+            }
+        }
+
+        // At this point we always have a Zuora Account ID in $zuoraAccountId
+        // Stub fake subscriptions for now
+        $fakeSubscriptions = [
+            [
+                'id'                    => 'stub-sub-001',
+                'zuora_subscription_id' => 'ZSUB-stub-001',
+                'name'                  => 'Example Plan',
+                'status'                => 'Active',
+                'start_date'            => '2025-01-01',
+                'end_date'              => '2026-01-01',
+                'created_at'            => '2025-01-01',
+            ],
+        ];
+
+        return [
+            'success'       => true,
+            'subscriptions' => $fakeSubscriptions,
+            'message'       => 'Zuora fetch STUB for account ' . $zuoraAccountId,
         ];
     }
 }
