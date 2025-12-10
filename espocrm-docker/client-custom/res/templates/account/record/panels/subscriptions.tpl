@@ -20,6 +20,8 @@
                             <th style="width: 15%">End Date</th>
                             <th style="width: 15%">Status</th>
                             <th style="width: 20%">Created</th>
+                            {{!-- NEW --}}
+                            <th style="width: 10%">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -30,6 +32,25 @@
                                 <td>{{end_date}}</td>
                                 <td><span class="label label-success">{{status}}</span></td>
                                 <td>{{created_at}}</td>
+
+                                {{!-- NEW: action buttons --}}
+                                <td>
+                                    <button
+                                        class="btn btn-xs btn-default action-change-subscription"
+                                        data-id="{{id}}"
+                                        data-zuora-subscription-id="{{zuora_subscription_id}}"
+                                    >
+                                        Change
+                                    </button>
+
+                                    <button
+                                        class="btn btn-xs btn-danger action-cancel-subscription"
+                                        data-id="{{id}}"
+                                        data-zuora-subscription-id="{{zuora_subscription_id}}"
+                                    >
+                                        Cancel
+                                    </button>
+                                </td>
                             </tr>
                         {{/each}}
                     </tbody>
