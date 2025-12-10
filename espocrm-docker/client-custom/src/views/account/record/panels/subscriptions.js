@@ -3,6 +3,35 @@ define('custom:views/account/record/panels/subscriptions', ['views/record/panels
     return Dep.extend({
         
         template: 'custom:account/record/panels/subscriptions',
+
+        // NEW: button click events
+        events: {
+            'click .action-change-subscription': function (e) {
+                const $btn = $(e.currentTarget);
+                const subscriptionId = $btn.data('id');
+                const zuoraSubscriptionId = $btn.data('zuora-subscription-id');
+
+                console.log('Change subscription clicked', {
+                    subscriptionId,
+                    zuoraSubscriptionId
+                });
+
+                this.notify('Change subscription clicked (not wired yet)', 'info');
+            },
+
+            'click .action-cancel-subscription': function (e) {
+                const $btn = $(e.currentTarget);
+                const subscriptionId = $btn.data('id');
+                const zuoraSubscriptionId = $btn.data('zuora-subscription-id');
+
+                console.log('Cancel subscription clicked', {
+                    subscriptionId,
+                    zuoraSubscriptionId
+                });
+
+                this.notify('Cancel subscription clicked (not wired yet)', 'info');
+            }
+        },
         
         data: function () {
             return {
