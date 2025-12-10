@@ -117,7 +117,7 @@ define('custom:views/account/record/panels/subscriptions', ['views/record/panels
         openPlanSelectDialog: function (subscriptionIds, zuoraSubscriptionIds) {
             const scope = 'CSubscriptionPlan';
 
-            this.createView('selectPlan', 'views/modals/select-record', {
+            this.createView('selectPlan', 'views/modals/select-records', {
                 scope: scope,
                 multiple: false
             }, function (view) {
