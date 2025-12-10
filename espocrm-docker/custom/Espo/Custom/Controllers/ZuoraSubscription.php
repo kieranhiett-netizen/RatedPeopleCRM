@@ -14,52 +14,110 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
     }
 
     /**
-     * Stub for "change subscription" – currently just echoes input back.
+     * Change subscription(s) – STUB ONLY
      * Called by POST /api/v1/ZuoraSubscription/action/change
      */
     public function postActionChange($params, $data, $request): array
     {
         $this->checkAccess();
 
-        $subscriptionId       = $data->subscriptionId ?? null;
-        $zuoraSubscriptionId  = $data->zuoraSubscriptionId ?? null;
-        $planId               = $data->planId ?? null;
-        $effectivePolicy      = $data->effectivePolicy ?? 'Immediate';
+        // Accept one or many subscription IDs
+        $subscriptionIds = $data->subscriptionIds ?? [];
+        if (is_string($subscriptionIds)) {
+            $subscriptionIds = [$subscriptionIds];
+        }
+        if (!is_array($subscriptionIds)) {
+            $subscriptionIds = [];
+        }
+
+        if (empty($subscriptionIds)) {
+            return [
+                'success' => false,
+                'message' => 'No subscriptionIds provided from client.'
+            ];
+        }
+
+        $zuoraSubscriptionIds = $data->zuoraSubscriptionIds ?? [];
+        if (is_string($zuoraSubscriptionIds)) {
+            $zuoraSubscriptionIds = [$zuoraSubscriptionIds];
+        }
+        if (!is_array($zuoraSubscriptionIds)) {
+            $zuoraSubscriptionIds = [];
+        }
+
+        $planId          = $data->planId ?? null;
+        $effectivePolicy = $data->effectivePolicy ?? 'Immediate';
+        $accountId       = $data->accountId ?? null;
+        $zuoraAccountId  = $data->zuoraAccountId ?? null;
 
         return [
             'success' => true,
             'message' => sprintf(
-                'Change stub: subscription=%s, zuora=%s, plan=%s, policy=%s',
-                $subscriptionId,
-                $zuoraSubscriptionId,
-                $planId,
+                'Change stub: %d subscription(s), plan=%s, policy=%s',
+                count($subscriptionIds),
+                (string) $planId,
                 $effectivePolicy
             ),
-            'input' => $data,
+            'data' => [
+                'subscriptionIds'      => $subscriptionIds,
+                'zuoraSubscriptionIds' => $zuoraSubscriptionIds,
+                'planId'               => $planId,
+                'effectivePolicy'      => $effectivePolicy,
+                'accountId'            => $accountId,
+                'zuoraAccountId'       => $zuoraAccountId,
+            ],
         ];
     }
 
     /**
-     * Stub for "cancel subscription" – currently just echoes input back.
+     * Cancel subscription(s) – STUB ONLY
      * Called by POST /api/v1/ZuoraSubscription/action/cancel
      */
     public function postActionCancel($params, $data, $request): array
     {
         $this->checkAccess();
 
-        $subscriptionId       = $data->subscriptionId ?? null;
-        $zuoraSubscriptionId  = $data->zuoraSubscriptionId ?? null;
-        $cancelPolicy         = $data->cancelPolicy ?? 'EndOfTerm';
+        $subscriptionIds = $data->subscriptionIds ?? [];
+        if (is_string($subscriptionIds)) {
+            $subscriptionIds = [$subscriptionIds];
+        }
+        if (!is_array($subscriptionIds)) {
+            $subscriptionIds = [];
+        }
+
+        if (empty($subscriptionIds)) {
+            return [
+                'success' => false,
+                'message' => 'No subscriptionIds provided from client.'
+            ];
+        }
+
+        $zuoraSubscriptionIds = $data->zuoraSubscriptionIds ?? [];
+        if (is_string($zuoraSubscriptionIds)) {
+            $zuoraSubscriptionIds = [$zuoraSubscriptionIds];
+        }
+        if (!is_array($zuoraSubscriptionIds)) {
+            $zuoraSubscriptionIds = [];
+        }
+
+        $cancelPolicy   = $data->cancelPolicy ?? 'EndOfTerm';
+        $accountId      = $data->accountId ?? null;
+        $zuoraAccountId = $data->zuoraAccountId ?? null;
 
         return [
             'success' => true,
             'message' => sprintf(
-                'Cancel stub: subscription=%s, zuora=%s, policy=%s',
-                $subscriptionId,
-                $zuoraSubscriptionId,
+                'Cancel stub: %d subscription(s), policy=%s',
+                count($subscriptionIds),
                 $cancelPolicy
             ),
-            'input' => $data,
+            'data' => [
+                'subscriptionIds'      => $subscriptionIds,
+                'zuoraSubscriptionIds' => $zuoraSubscriptionIds,
+                'cancelPolicy'         => $cancelPolicy,
+                'accountId'            => $accountId,
+                'zuoraAccountId'       => $zuoraAccountId,
+            ],
         ];
     }
 }
