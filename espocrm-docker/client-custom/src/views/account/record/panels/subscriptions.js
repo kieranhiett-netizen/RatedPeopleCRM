@@ -34,60 +34,31 @@ define('custom:views/account/record/panels/subscriptions', ['views/record/panels
             },
 
             'click .action-cancel-subscription-panel': function (e) {
-    if (!this.activeSubscriptions || !this.activeSubscriptions.length) {
-        this.notify('No active subscriptions to cancel.', 'warning');
-        return;
-    }
+                if (!this.activeSubscriptions || !this.activeSubscriptions.length) {
+                    this.notify('No active subscriptions to cancel.', 'warning');
+                    return;
+                }
 
-    const subscriptionIds = this.activeSubscriptions.map(s => s.id);
-    const zuoraSubscriptionIds = this.activeSubscriptions
-        .map(s => s.zuora_subscription_id)
-        .filter(Boolean);
+                const subscriptionIds = this.activeSubscriptions.map(s => s.id);
+                const zuoraSubscriptionIds = this.activeSubscriptions
+                    .map(s => s.zuora_subscription_id)
+                    .filter(Boolean);
 
-    // Use an Espo modal with explicit buttons instead of browser confirm
-    this.createView('cancelDialog', 'views/modal', {
-        // options object – we’ll finish setup in the callback
-    }, (view) => {
-        view.headerText = 'Cancel Subscription';
-        view.templateContent = '<p>How would you like to cancel this subscription?</p>';
+                const atRenewal = window.confirm(
+                    'Cancel at renewal? (OK = cancel at renewal, Cancel = cancel at next payment date)'
+                );
+                const cancelPolicy = atRenewal ? 'EndOfTerm' : 'NextPayment';
 
-        view.buttonList = [
-            {
-                name: 'cancelAtRenewal',
-                label: 'Cancel at renewal',
-                style: 'default',
-                onClick: () => {
-                    this.executeAction('cancel', {
-                        subscriptionIds: subscriptionIds,
-                        zuoraSubscriptionIds: zuoraSubscriptionIds,
-                        cancelPolicy: 'EndOfTerm'
-                    });
-                    view.close();
-                },
-            },
-            {
-                name: 'cancelAtNextPayment',
-                label: 'Cancel at next payment date',
-                style: 'danger',
-                onClick: () => {
-                    this.executeAction('cancel', {
-                        subscriptionIds: subscriptionIds,
-                        zuoraSubscriptionIds: zuoraSubscriptionIds,
-                        cancelPolicy: 'NextPayment'
-                    });
-                    view.close();
-                },
-            },
-            {
-                name: 'close',
-                label: this.translate('Close'),
-            },
-        ];
+                if (!window.confirm('Are you sure you want to cancel the whole subscription?')) {
+                    return;
+                }
 
-        view.render();
-    });
-}
-
+                this.executeAction('cancel', {
+                    subscriptionIds: subscriptionIds,
+                    zuoraSubscriptionIds: zuoraSubscriptionIds,
+                    cancelPolicy: cancelPolicy
+                });
+            }
         },
         
         data: function () {
