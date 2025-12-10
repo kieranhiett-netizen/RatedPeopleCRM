@@ -4,46 +4,58 @@ define('custom:views/account/record/panels/subscriptions', ['views/record/panels
         
         template: 'custom:account/record/panels/subscriptions',
 
-        // Button click events – now call backend stub
+        // Panel-level actions: one Change + one Cancel for all active subs
         events: {
-            'click .action-change-subscription': function (e) {
-                const $btn = $(e.currentTarget);
-                const subscriptionId = $btn.data('id');
-                const zuoraSubscriptionId = $btn.data('zuora-subscription-id');
+            'click .action-change-subscription-panel': function (e) {
+                if (!this.activeSubscriptions || !this.activeSubscriptions.length) {
+                    this.notify('No active subscriptions to change.', 'warning');
+                    return;
+                }
 
-                // Ask user for a new plan ID (stub input)
-                const newPlanId = window.prompt('Enter new plan ID (test only):');
+                const subscriptionIds = this.activeSubscriptions.map(s => s.id);
+                const zuoraSubscriptionIds = this.activeSubscriptions
+                    .map(s => s.zuora_subscription_id)
+                    .filter(Boolean);
+
+                const newPlanId = window.prompt('Enter new plan ID (applies to whole subscription):');
                 if (!newPlanId) {
                     return;
                 }
 
-                // Ask how to apply the change
                 const useNextBilling = window.confirm('Apply at next billing cycle? (OK = Yes, Cancel = Immediate)');
                 const effectivePolicy = useNextBilling ? 'NextBillingPeriod' : 'Immediate';
 
                 this.executeAction('change', {
-                    subscriptionId: subscriptionId,
-                    zuoraSubscriptionId: zuoraSubscriptionId,
+                    subscriptionIds: subscriptionIds,
+                    zuoraSubscriptionIds: zuoraSubscriptionIds,
                     planId: newPlanId,
                     effectivePolicy: effectivePolicy
                 });
             },
 
-            'click .action-cancel-subscription': function (e) {
-                const $btn = $(e.currentTarget);
-                const subscriptionId = $btn.data('id');
-                const zuoraSubscriptionId = $btn.data('zuora-subscription-id');
+            'click .action-cancel-subscription-panel': function (e) {
+                if (!this.activeSubscriptions || !this.activeSubscriptions.length) {
+                    this.notify('No active subscriptions to cancel.', 'warning');
+                    return;
+                }
 
-                const atRenewal = window.confirm('Cancel at renewal? (OK = Yes, Cancel = Next payment date)');
+                const subscriptionIds = this.activeSubscriptions.map(s => s.id);
+                const zuoraSubscriptionIds = this.activeSubscriptions
+                    .map(s => s.zuora_subscription_id)
+                    .filter(Boolean);
+
+                const atRenewal = window.confirm(
+                    'Cancel at renewal? (OK = cancel at renewal, Cancel = cancel at next payment date)'
+                );
                 const cancelPolicy = atRenewal ? 'EndOfTerm' : 'NextPayment';
 
-                if (!window.confirm('Are you sure you want to cancel this subscription?')) {
+                if (!window.confirm('Are you sure you want to cancel the whole subscription?')) {
                     return;
                 }
 
                 this.executeAction('cancel', {
-                    subscriptionId: subscriptionId,
-                    zuoraSubscriptionId: zuoraSubscriptionId,
+                    subscriptionIds: subscriptionIds,
+                    zuoraSubscriptionIds: zuoraSubscriptionIds,
                     cancelPolicy: cancelPolicy
                 });
             }
@@ -115,10 +127,10 @@ define('custom:views/account/record/panels/subscriptions', ['views/record/panels
                 });
         },
 
-        // NEW: helper to call ZuoraSubscription stub controller
+        // Calls ZuoraSubscription controller – now sending arrays
         executeAction: function (action, payload) {
             const accountId = this.model.id;
-            const zuoraAccountId = this.model.get('c_zuoraaccount_id') || null; // your Zuora account field
+            const zuoraAccountId = this.model.get('c_zuoraaccount_id') || null;
 
             payload.accountId = accountId;
             payload.zuoraAccountId = zuoraAccountId;
@@ -130,7 +142,7 @@ define('custom:views/account/record/panels/subscriptions', ['views/record/panels
                     console.log('ZuoraSubscription response:', response);
                     this.notify(response.message || 'Subscription action completed', 'success');
 
-                    // Reload subscriptions so UI can reflect changes once we start updating DB
+                    // Reload subscriptions so panel reflects changes
                     this.loadSubscriptions();
                 })
                 .catch((error) => {

@@ -11,8 +11,10 @@
         {{#if subscriptions.length}}
             
             {{#if activeSubscriptions.length}}
-                <h4 style="margin-top: 0; margin-bottom: 15px; color: #3c763d;">Active Subscriptions</h4>
-                <table class="table table-panel" style="margin-bottom: 30px;">
+                <h4 style="margin-top: 0; margin-bottom: 15px; color: #3c763d;">
+                    Active Subscriptions
+                </h4>
+                <table class="table table-panel" style="margin-bottom: 10px;">
                     <thead>
                         <tr>
                             <th style="width: 25%">Name</th>
@@ -20,8 +22,6 @@
                             <th style="width: 15%">End Date</th>
                             <th style="width: 15%">Status</th>
                             <th style="width: 20%">Created</th>
-                            {{!-- NEW --}}
-                            <th style="width: 10%">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -32,33 +32,34 @@
                                 <td>{{end_date}}</td>
                                 <td><span class="label label-success">{{status}}</span></td>
                                 <td>{{created_at}}</td>
-
-                                {{!-- NEW: action buttons --}}
-                                <td>
-                                    <button
-                                        class="btn btn-xs btn-default action-change-subscription"
-                                        data-id="{{id}}"
-                                        data-zuora-subscription-id="{{zuora_subscription_id}}"
-                                    >
-                                        Change
-                                    </button>
-
-                                    <button
-                                        class="btn btn-xs btn-danger action-cancel-subscription"
-                                        data-id="{{id}}"
-                                        data-zuora-subscription-id="{{zuora_subscription_id}}"
-                                    >
-                                        Cancel
-                                    </button>
-                                </td>
                             </tr>
                         {{/each}}
                     </tbody>
                 </table>
+
+                {{!-- ONE set of actions for the whole subscription group --}}
+                <div class="text-center" style="margin: 15px 0 25px;">
+                    <button
+                        class="btn btn-default action-change-subscription-panel"
+                        type="button"
+                    >
+                        Change Subscription
+                    </button>
+
+                    <button
+                        class="btn btn-danger action-cancel-subscription-panel"
+                        type="button"
+                        style="margin-left: 10px;"
+                    >
+                        Cancel Subscription
+                    </button>
+                </div>
             {{/if}}
             
             {{#if previousSubscriptions.length}}
-                <h4 style="margin-top: 20px; margin-bottom: 15px; color: #8a6d3b;">Previous Subscriptions</h4>
+                <h4 style="margin-top: 20px; margin-bottom: 15px; color: #8a6d3b;">
+                    Previous Subscriptions
+                </h4>
                 <table class="table table-panel">
                     <thead>
                         <tr>
