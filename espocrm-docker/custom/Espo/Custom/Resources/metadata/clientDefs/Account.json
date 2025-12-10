@@ -1,23 +1,17 @@
 {
-    "bottomPanels": {
-        "detail": [
-            "__APPEND__",
-            {
-                "name": "subscriptions",
-                "label": "Subscriptions",
-                "view": "custom:views/account/record/panels/subscriptions"
-            },
-            {
-                "name": "caseHistory",
-                "label": "Case History",
-                "view": "custom:views/account/record/panels/case-history"
-            }
-        ]
-    },
-    "relationshipPanels": {
-        "subscriptions": {
-            "layout": null,
-            "selectPrimaryFilterName": null
-        }
-    }
+  "bottomPanels": {
+    "detail": [
+      "__APPEND__",
+      {
+        "name": "subscriptions",
+        "label": "Subscriptions",
+        "view": "custom:views/account/record/panels/subscriptions"
+      },
+      {
+        "name": "caseHistory",
+        "label": "Case History",
+        "view": "custom:views/account/record/panels/case-history"
+      }
+    ]
+  }
 }
