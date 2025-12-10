@@ -6,13 +6,14 @@ use Espo\Core\Exceptions\Forbidden;
 
 class ZuoraSubscription extends \Espo\Core\Controllers\Base
 {
-    protected function checkAccess(): void
+    protected function checkAccess(): bool
     {
         if (!$this->getAcl()->checkScope('Account', 'edit')) {
             throw new Forbidden();
         }
+    
+        return true;
     }
-
     /**
      * Change subscription(s) – STUB ONLY
      * Called by POST /api/v1/ZuoraSubscription/action/change
