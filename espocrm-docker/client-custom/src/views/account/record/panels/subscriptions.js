@@ -4,19 +4,29 @@ define('custom:views/account/record/panels/subscriptions', ['views/record/panels
         
         template: 'custom:account/record/panels/subscriptions',
 
-        // NEW: button click events
+        // Button click events – now call backend stub
         events: {
             'click .action-change-subscription': function (e) {
                 const $btn = $(e.currentTarget);
                 const subscriptionId = $btn.data('id');
                 const zuoraSubscriptionId = $btn.data('zuora-subscription-id');
 
-                console.log('Change subscription clicked', {
-                    subscriptionId,
-                    zuoraSubscriptionId
-                });
+                // Ask user for a new plan ID (stub input)
+                const newPlanId = window.prompt('Enter new plan ID (test only):');
+                if (!newPlanId) {
+                    return;
+                }
 
-                this.notify('Change subscription clicked (not wired yet)', 'info');
+                // Ask how to apply the change
+                const useNextBilling = window.confirm('Apply at next billing cycle? (OK = Yes, Cancel = Immediate)');
+                const effectivePolicy = useNextBilling ? 'NextBillingPeriod' : 'Immediate';
+
+                this.executeAction('change', {
+                    subscriptionId: subscriptionId,
+                    zuoraSubscriptionId: zuoraSubscriptionId,
+                    planId: newPlanId,
+                    effectivePolicy: effectivePolicy
+                });
             },
 
             'click .action-cancel-subscription': function (e) {
@@ -24,12 +34,18 @@ define('custom:views/account/record/panels/subscriptions', ['views/record/panels
                 const subscriptionId = $btn.data('id');
                 const zuoraSubscriptionId = $btn.data('zuora-subscription-id');
 
-                console.log('Cancel subscription clicked', {
-                    subscriptionId,
-                    zuoraSubscriptionId
-                });
+                const atRenewal = window.confirm('Cancel at renewal? (OK = Yes, Cancel = Next payment date)');
+                const cancelPolicy = atRenewal ? 'EndOfTerm' : 'NextPayment';
 
-                this.notify('Cancel subscription clicked (not wired yet)', 'info');
+                if (!window.confirm('Are you sure you want to cancel this subscription?')) {
+                    return;
+                }
+
+                this.executeAction('cancel', {
+                    subscriptionId: subscriptionId,
+                    zuoraSubscriptionId: zuoraSubscriptionId,
+                    cancelPolicy: cancelPolicy
+                });
             }
         },
         
@@ -96,6 +112,30 @@ define('custom:views/account/record/panels/subscriptions', ['views/record/panels
                     this.error = 'Failed to load subscriptions';
                     console.error('Subscription load error:', error);
                     this.reRender();
+                });
+        },
+
+        // NEW: helper to call ZuoraSubscription stub controller
+        executeAction: function (action, payload) {
+            const accountId = this.model.id;
+            const zuoraAccountId = this.model.get('c_zuoraaccount_id') || null; // your Zuora account field
+
+            payload.accountId = accountId;
+            payload.zuoraAccountId = zuoraAccountId;
+
+            const url = `ZuoraSubscription/action/${action}`;
+
+            Espo.Ajax.postRequest(url, payload)
+                .then((response) => {
+                    console.log('ZuoraSubscription response:', response);
+                    this.notify(response.message || 'Subscription action completed', 'success');
+
+                    // Reload subscriptions so UI can reflect changes once we start updating DB
+                    this.loadSubscriptions();
+                })
+                .catch((error) => {
+                    console.error('Subscription action error:', error);
+                    this.notify('Subscription action failed (see console)', 'error');
                 });
         }
     });
