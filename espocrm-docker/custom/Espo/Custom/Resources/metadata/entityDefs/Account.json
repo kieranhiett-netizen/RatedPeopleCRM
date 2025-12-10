@@ -5,8 +5,16 @@
             "maxLength": 100,
             "options": [],
             "isCustom": true
+        },
+
+        "cZuoraAccountId": {
+            "type": "varchar",
+            "maxLength": 100,
+            "isCustom": true,
+            "db": "c_zuoraaccount_id"
         }
     },
+
     "links": {
         "cSubscriptions": {
             "type": "hasMany",
