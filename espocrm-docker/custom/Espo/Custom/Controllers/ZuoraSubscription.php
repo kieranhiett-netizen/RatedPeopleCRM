@@ -92,8 +92,8 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
     {
         $this->checkAccess();
 
-         // Account to attach the stream note to (if provided)
-    $accountId = $data->accountId ?? null;
+        // Account to attach the stream note to (if provided)
+        $accountId = $data->accountId ?? null;
 
         // 1) Normalise arrays coming from JS
         $subscriptionIds = $data->subscriptionIds ?? [];
@@ -213,7 +213,7 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
             ];
         }
 
-               // 5) Friendly message for Espo toast (no PHP 8 match; simple if/else)
+        // 5) Friendly message for Espo toast
         $humanPolicy = 'at renewal (end of term)';
         if ($uiPolicy === 'Immediate') {
             $humanPolicy = 'immediately';
@@ -234,14 +234,18 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
             );
         }
 
-        // --- NEW: log to Account stream if we know the account ---
+        // Log to Account stream if we know the account – but never break the API if logging fails
         if ($overallSuccess && $accountId) {
-            $this->logAccountStreamCancellation(
-                $accountId,
-                $zuoraSubscriptionIds,
-                $uiPolicy,
-                $humanPolicy
-            );
+            try {
+                $this->logAccountStreamCancellation(
+                    $accountId,
+                    $zuoraSubscriptionIds,
+                    $uiPolicy,
+                    $humanPolicy
+                );
+            } catch (\Throwable $e) {
+                // Swallow logging errors. If you want later we can log this via Espo logger.
+            }
         }
 
         return [
@@ -400,15 +404,27 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
      * @param string $humanPolicyText e.g. "immediately"
      */
     protected function logAccountStreamCancellation(
-        string $accountId,
-        array $zuoraSubscriptionIds,
-        string $uiPolicy,
-        string $humanPolicyText
-    ): void {
+        $accountId,
+        $zuoraSubscriptionIds,
+        $uiPolicy,
+        $humanPolicyText
+    ) {
         $entityManager = $this->getEntityManager();
+
+        // Make sure it’s an array
+        if (!is_array($zuoraSubscriptionIds)) {
+            if ($zuoraSubscriptionIds === null) {
+                $zuoraSubscriptionIds = [];
+            } else {
+                $zuoraSubscriptionIds = [$zuoraSubscriptionIds];
+            }
+        }
 
         // Create new Note entity (Stream entry)
         $note = $entityManager->getEntity('Note'); // new empty entity
+        if (!$note) {
+            return;
+        }
 
         $note->set('parentType', 'Account');
         $note->set('parentId', $accountId);
@@ -425,17 +441,15 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
         // Text shown in Stream
         $note->set('post', $postText);
 
-        // Optional: internal-only
-        // $note->set('isInternal', true);
-
         // Attribute to current user if available
         $user = $this->getUser();
-        if ($user) {
+        if ($user && !empty($user->id)) {
             $note->set('createdById', $user->id);
         }
 
         $entityManager->saveEntity($note);
     }
+
     /**
      * Get Zuora access token using client_credentials,
      * configured in data/config.php.
