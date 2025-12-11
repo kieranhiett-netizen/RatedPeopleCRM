@@ -29,7 +29,7 @@
                     <tbody>
                         {{#each activeSubscriptions}}
                             <tr>
-                                <td>{{name}}</td>
+                                <td>{{{name}}}</td>
                                 <td>{{start_date}}</td>
                                 <td>{{end_date}}</td>
                                 <td><span class="label label-success">{{status}}</span></td>

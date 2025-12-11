@@ -341,6 +341,9 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
     /**
      * Call Zuora REST API to get subscriptions for an account.
      *
+        /**
+     * Call Zuora REST API to get subscriptions for an account.
+     *
      * @param string $zuoraAccountId  Zuora Account ID or Account Number
      * @return array                  Normalised subscriptions for the panel
      */
@@ -350,7 +353,7 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
             return [];
         }
 
-        $config = $this->getConfig();
+        $config  = $this->getConfig();
         $baseUrl = rtrim((string) $config->get('zuoraApiUrl'), '/');
 
         if (!$baseUrl) {
@@ -406,21 +409,66 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
                 continue;
             }
 
-            // Map Zuora fields to our panel’s expected shape.
+            // Core IDs
             $id        = $sub['id'] ?? ($sub['subscriptionNumber'] ?? null);
             $subNumber = $sub['subscriptionNumber'] ?? $id;
             $status    = $sub['status'] ?? ($sub['state'] ?? null);
 
-            $startDate = $sub['termStartDate']
+            // DATES
+            // Original subscription start (what you see in Zuora as "Subscription Start Date")
+            $originalStart = $sub['subscriptionStartDate']
+                ?? $sub['termStartDate']
                 ?? $sub['contractEffectiveDate']
-                ?? $sub['subscriptionStartDate']
                 ?? null;
 
-            $endDate   = $sub['termEndDate'] ?? null;
-            $createdAt = $sub['subscriptionStartDate'] ?? $startDate;
+            // Current term start/end exist in Zuora UI; API commonly has termStartDate/termEndDate
+            $termEnd = $sub['termEndDate'] ?? null;
 
-            // You can later swap this to product / rate plan names
-            $name = $subNumber ?: 'Subscription';
+            // Created date – if Zuora includes createdDate, use it;
+            // otherwise fall back to original start.
+            $created = $sub['createdDate'] ?? $originalStart;
+
+            // Format dates as DD-MM-YYYY for Espo
+            $startDate  = $this->formatDateForEspo($originalStart);
+            $endDate    = $this->formatDateForEspo($termEnd);
+            $createdAt  = $this->formatDateForEspo($created);
+
+            // RATE PLAN / PRODUCT NAMES
+            // Each subscription has ratePlans[], each with productName + ratePlanName.
+            $planNames = [];
+
+            if (!empty($sub['ratePlans']) && is_array($sub['ratePlans'])) {
+                foreach ($sub['ratePlans'] as $rp) {
+                    if (!is_array($rp)) {
+                        continue;
+                    }
+
+                    $pieces = [];
+
+                    if (!empty($rp['productName'])) {
+                        $pieces[] = $rp['productName'];
+                    }
+
+                    if (!empty($rp['ratePlanName'])) {
+                        // join product + plan nicely
+                        $pieces[] = $rp['ratePlanName'];
+                    }
+
+                    if (!empty($pieces)) {
+                        // "Product Name – Rate Plan Name"
+                        $planNames[] = implode(' – ', $pieces);
+                    }
+                }
+            }
+
+            // If we got plan names, show each on its own line in the table cell.
+            // We'll emit <br> and let the template render HTML.
+            if (!empty($planNames)) {
+                $name = implode('<br>', $planNames);
+            } else {
+                // Fallback to subscription number
+                $name = $subNumber ?: 'Subscription';
+            }
 
             $result[] = [
                 'id'                    => $id,
@@ -435,6 +483,7 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
 
         return $result;
     }
+
 
     /**
      * Helper: get entity manager from the DI container.
@@ -451,4 +500,24 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
     {
         return $this->getContainer()->get('config');
     }
+
+        /**
+     * Format a Zuora date (YYYY-MM-DD or YYYY-MM-DDThh:mm:ss) as DD-MM-YYYY
+     * for display in Espo.
+     */
+    protected function formatDateForEspo($date)
+    {
+        if (!$date || !is_string($date)) {
+            return null;
+        }
+
+        // Match leading YYYY-MM-DD from either "YYYY-MM-DD" or "YYYY-MM-DDThh:mm:ss"
+        if (preg_match('/^(\d{4})-(\d{2})-(\d{2})/', $date, $m)) {
+            return $m[3] . '-' . $m[2] . '-' . $m[1]; // DD-MM-YYYY
+        }
+
+        // Fallback: return as-is
+        return $date;
+    }
+
 }
