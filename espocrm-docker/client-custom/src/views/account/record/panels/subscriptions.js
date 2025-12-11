@@ -127,9 +127,8 @@ define('custom:views/account/record/panels/subscriptions', ['views/record/panels
 
         openPlanSelectDialog: function (subscriptionIds, zuoraSubscriptionIds) {
             const scope = 'CSubscriptionPlan';
-
-            // NOTE: correct view path is select-record (singular)
-            this.createView('selectPlan', 'views/modals/select-record', {
+            
+            this.createView('selectPlan', 'views/modals/select-records', {
                 scope: scope,
                 multiple: false
             }, function (view) {
