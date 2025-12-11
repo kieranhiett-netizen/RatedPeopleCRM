@@ -19,7 +19,7 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
     }
 
     /**
-     * Change subscription(s) – STUB
+     * Change subscription(s) – STUB (no real Zuora call yet)
      * POST /api/v1/ZuoraSubscription/action/change
      */
     public function postActionChange($params, $data, $request): array
@@ -80,26 +80,25 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
     }
 
     /**
-     * Cancel subscription(s) – STUB
+     * Cancel subscription(s) – REAL Zuora call
      * POST /api/v1/ZuoraSubscription/action/cancel
+     *
+     * Expected payload from JS:
+     *  - subscriptionIds:       [ ... ]                  // Espo internal ids (for reference)
+     *  - zuoraSubscriptionIds:  [ "A-S00....", ... ]     // Zuora subscription numbers
+     *  - cancelPolicy:          "Immediate" | "NextPayment" | "EndOfTerm"
      */
     public function postActionCancel($params, $data, $request): array
     {
         $this->checkAccess();
 
+        // 1) Normalise arrays coming from JS
         $subscriptionIds = $data->subscriptionIds ?? [];
         if (is_string($subscriptionIds)) {
             $subscriptionIds = [$subscriptionIds];
         }
         if (!is_array($subscriptionIds)) {
             $subscriptionIds = [];
-        }
-
-        if (empty($subscriptionIds)) {
-            return [
-                'success' => false,
-                'message' => 'No subscriptionIds provided from client.',
-            ];
         }
 
         $zuoraSubscriptionIds = $data->zuoraSubscriptionIds ?? [];
@@ -110,28 +109,138 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
             $zuoraSubscriptionIds = [];
         }
 
-        $cancelPolicy   = $data->cancelPolicy ?? 'EndOfTerm';
-        $accountId      = $data->accountId ?? null;
-        $zuoraAccountId = $data->zuoraAccountId ?? null;
+        if (empty($zuoraSubscriptionIds)) {
+            return [
+                'success' => false,
+                'message' => 'No Zuora subscription IDs provided; cannot cancel in Zuora.',
+            ];
+        }
 
-        // Optional: resolve Zuora Account ID from Account if missing
-        if ($accountId && !$zuoraAccountId) {
-            $zuoraAccountId = $this->resolveZuoraAccountIdFromAccount($accountId);
+        // 2) Map your UI options to Zuora cancellation policies
+        $uiPolicy = $data->cancelPolicy ?? 'EndOfTerm';
+
+        $zuoraPolicy   = 'EndOfCurrentTerm'; // default = at renewal
+        $effectiveDate = null;
+
+        switch ($uiPolicy) {
+            case 'Immediate':
+                // Cancel from "today"
+                $zuoraPolicy   = 'SpecificDate';
+                $effectiveDate = (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))
+                    ->format('Y-m-d'); // Zuora expects yyyy-mm-dd
+                break;
+
+            case 'NextPayment':
+                // End of current billing period / next payment date
+                $zuoraPolicy = 'EndOfLastInvoicePeriod';
+                break;
+
+            case 'EndOfTerm':
+            default:
+                // End of current term
+                $zuoraPolicy = 'EndOfCurrentTerm';
+                break;
+        }
+
+        // 3) Zuora config & token
+        $config      = $this->getConfig();
+        $zuoraApiUrl = rtrim((string) $config->get('zuoraApiUrl'), '/');
+
+        if (!$zuoraApiUrl) {
+            return [
+                'success' => false,
+                'message' => 'Zuora API URL (zuoraApiUrl) is not configured.',
+            ];
+        }
+
+        $accessToken = $this->getZuoraAccessToken();
+        if (!$accessToken) {
+            return [
+                'success' => false,
+                'message' => 'Failed to obtain Zuora access token (check client id/secret).',
+            ];
+        }
+
+        // 4) Call Zuora cancel endpoint for each subscription
+        //    Endpoint: PUT /v1/subscriptions/{subscription-key}/cancel
+        $results        = [];
+        $overallSuccess = true;
+
+        foreach ($zuoraSubscriptionIds as $subKey) {
+            $body = [
+                'cancellationPolicy' => $zuoraPolicy,
+            ];
+
+            if ($effectiveDate !== null) {
+                $body['cancellationEffectiveDate'] = $effectiveDate;
+            }
+
+            $ch = curl_init($zuoraApiUrl . '/v1/subscriptions/' . rawurlencode($subKey) . '/cancel');
+
+            curl_setopt_array($ch, [
+                CURLOPT_CUSTOMREQUEST  => 'PUT',
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_HTTPHEADER     => [
+                    'Authorization: Bearer ' . $accessToken,
+                    'Content-Type: application/json',
+                    'Accept: application/json',
+                    'Zuora-Version: 211.0',
+                ],
+                CURLOPT_POSTFIELDS     => json_encode($body),
+            ]);
+
+            $raw    = curl_exec($ch);
+            $err    = curl_error($ch);
+            $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            $decoded = json_decode($raw, true) ?: [];
+
+            $successForThis = $status >= 200 && $status < 300 && !empty($decoded['success']);
+            if (!$successForThis) {
+                $overallSuccess = false;
+            }
+
+            $results[] = [
+                'subscriptionKey' => $subKey,
+                'httpStatus'      => $status,
+                'success'         => $successForThis,
+                'response'        => $decoded ?: $raw,
+                'error'           => $err ?: null,
+            ];
+        }
+
+        // 5) Friendly message for Espo toast (no PHP 8 match; simple if/else)
+        $humanPolicy = 'at renewal (end of term)';
+        if ($uiPolicy === 'Immediate') {
+            $humanPolicy = 'immediately';
+        } elseif ($uiPolicy === 'NextPayment') {
+            $humanPolicy = 'at next payment date';
+        }
+
+        if ($overallSuccess) {
+            $message = sprintf(
+                'Cancelled %d subscription(s) in Zuora (%s).',
+                count($zuoraSubscriptionIds),
+                $humanPolicy
+            );
+        } else {
+            $message = sprintf(
+                'One or more Zuora cancellations failed; %d attempted.',
+                count($zuoraSubscriptionIds)
+            );
         }
 
         return [
-            'success' => true,
-            'message' => sprintf(
-                'Cancel stub: %d subscription(s), policy=%s',
-                count($subscriptionIds),
-                $cancelPolicy
-            ),
-            'data' => [
+            'success' => $overallSuccess,
+            'message' => $message,
+            'data'    => [
                 'subscriptionIds'      => $subscriptionIds,
                 'zuoraSubscriptionIds' => $zuoraSubscriptionIds,
-                'cancelPolicy'         => $cancelPolicy,
-                'accountId'            => $accountId,
-                'zuoraAccountId'       => $zuoraAccountId,
+                'cancelPolicyUi'       => $uiPolicy,
+                'zuoraPolicy'          => $zuoraPolicy,
+                'effectiveDate'        => $effectiveDate,
+                'results'              => $results,
             ],
         ];
     }
@@ -140,10 +249,6 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
      * Explicitly link an Espo Account to a Zuora Account ID.
      *
      * POST /api/v1/ZuoraSubscription/action/linkAccount
-     *
-     * Payload:
-     *  - accountId      (required) : Espo Account ID
-     *  - zuoraAccountId (required) : Zuora Account ID from Zuora
      */
     public function postActionLinkAccount($params, $data, $request): array
     {
@@ -167,7 +272,7 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
         }
 
         $entityManager = $this->getEntityManager();
-        $account = $entityManager->getEntity('Account', $accountId);
+        $account       = $entityManager->getEntity('Account', $accountId);
 
         if (!$account) {
             return [
@@ -182,8 +287,6 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
                 'message' => 'Account already linked to this Zuora Account ID.',
             ];
         }
-
-        // TODO (optional): validate Zuora Account exists before saving.
 
         $account->set('cZuoraAccountId', $zuoraAccountId);
         $entityManager->saveEntity($account);
@@ -213,7 +316,6 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
         $accountId      = $data->accountId      ?? null;
         $zuoraAccountId = $data->zuoraAccountId ?? null;
 
-        // If neither accountId nor zuoraAccountId was provided:
         if (!$accountId && !$zuoraAccountId) {
             return [
                 'success'       => true,
@@ -223,20 +325,16 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
         }
 
         $entityManager = $this->getEntityManager();
-        $account = null;
+        $account       = null;
 
-        // If we have accountId, try to load Account entity,
-        // but don't throw if it fails – we can still use Zuora ID only.
         if ($accountId) {
             $account = $entityManager->getEntity('Account', $accountId);
         }
 
-        // If we have accountId but no Zuora ID — pull it from the Account entity
         if (!$zuoraAccountId && $account) {
             $zuoraAccountId = $account->get('cZuoraAccountId');
         }
 
-        // If still no Zuora ID, we cannot fetch subscriptions.
         if (!$zuoraAccountId) {
             return [
                 'success'       => true,
@@ -245,14 +343,11 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
             ];
         }
 
-        // If we have both account and Zuora ID and the field is out of sync,
-        // update the Account so the link is persisted.
         if ($account && $account->get('cZuoraAccountId') !== $zuoraAccountId) {
             $account->set('cZuoraAccountId', $zuoraAccountId);
             $entityManager->saveEntity($account);
         }
 
-        // At this point we always have a Zuora Account ID in $zuoraAccountId
         $subscriptions = $this->fetchSubscriptionsFromZuora($zuoraAccountId);
 
         return [
@@ -272,7 +367,7 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
         }
 
         $entityManager = $this->getEntityManager();
-        $account = $entityManager->getEntity('Account', $accountId);
+        $account       = $entityManager->getEntity('Account', $accountId);
 
         if (!$account) {
             return null;
@@ -283,16 +378,11 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
 
     /**
      * Get Zuora access token using client_credentials,
-     * configured in data/config.php:
-     *
-     * 'zuoraApiUrl'       => 'https://rest.sandbox.eu.zuora.com',
-     * 'zuoraClientId'     => '...',
-     * 'zuoraClientSecret' => '...'
+     * configured in data/config.php.
      */
     protected function getZuoraAccessToken()
     {
-        $config = $this->getConfig();
-
+        $config       = $this->getConfig();
         $baseUrl      = rtrim((string) $config->get('zuoraApiUrl'), '/');
         $clientId     = $config->get('zuoraClientId');
         $clientSecret = $config->get('zuoraClientSecret');
@@ -301,8 +391,7 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
             return null;
         }
 
-        $url = $baseUrl . '/oauth/token';
-
+        $url     = $baseUrl . '/oauth/token';
         $payload = http_build_query([
             'grant_type'    => 'client_credentials',
             'client_id'     => $clientId,
@@ -322,11 +411,9 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
 
         $raw   = curl_exec($ch);
         $errno = curl_errno($ch);
-        $error = curl_error($ch);
         curl_close($ch);
 
         if ($errno !== 0 || $raw === false) {
-            // Optionally log error
             return null;
         }
 
@@ -339,9 +426,6 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
     }
 
     /**
-     * Call Zuora REST API to get subscriptions for an account.
-     *
-        /**
      * Call Zuora REST API to get subscriptions for an account.
      *
      * @param string $zuoraAccountId  Zuora Account ID or Account Number
@@ -380,12 +464,10 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
 
         $raw    = curl_exec($ch);
         $errno  = curl_errno($ch);
-        $error  = curl_error($ch);
         $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
         if ($errno !== 0 || $raw === false || $status >= 400) {
-            // Optionally log: $error / $status
             return [];
         }
 
@@ -414,27 +496,22 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
             $subNumber = $sub['subscriptionNumber'] ?? $id;
             $status    = $sub['status'] ?? ($sub['state'] ?? null);
 
-            // DATES
-            // Original subscription start (what you see in Zuora as "Subscription Start Date")
+            // Original subscription start
             $originalStart = $sub['subscriptionStartDate']
                 ?? $sub['termStartDate']
                 ?? $sub['contractEffectiveDate']
                 ?? null;
 
-            // Current term start/end exist in Zuora UI; API commonly has termStartDate/termEndDate
             $termEnd = $sub['termEndDate'] ?? null;
 
-            // Created date – if Zuora includes createdDate, use it;
-            // otherwise fall back to original start.
             $created = $sub['createdDate'] ?? $originalStart;
 
             // Format dates as DD-MM-YYYY for Espo
-            $startDate  = $this->formatDateForEspo($originalStart);
-            $endDate    = $this->formatDateForEspo($termEnd);
-            $createdAt  = $this->formatDateForEspo($created);
+            $startDate = $this->formatDateForEspo($originalStart);
+            $endDate   = $this->formatDateForEspo($termEnd);
+            $createdAt = $this->formatDateForEspo($created);
 
             // RATE PLAN / PRODUCT NAMES
-            // Each subscription has ratePlans[], each with productName + ratePlanName.
             $planNames = [];
 
             if (!empty($sub['ratePlans']) && is_array($sub['ratePlans'])) {
@@ -450,25 +527,18 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
                     }
 
                     if (!empty($rp['ratePlanName'])) {
-                        // join product + plan nicely
                         $pieces[] = $rp['ratePlanName'];
                     }
 
                     if (!empty($pieces)) {
-                        // "Product Name – Rate Plan Name"
                         $planNames[] = implode(' – ', $pieces);
                     }
                 }
             }
 
-            // If we got plan names, show each on its own line in the table cell.
-            // We'll emit <br> and let the template render HTML.
-            if (!empty($planNames)) {
-                $name = implode('<br>', $planNames);
-            } else {
-                // Fallback to subscription number
-                $name = $subNumber ?: 'Subscription';
-            }
+            $name = !empty($planNames)
+                ? implode('<br>', $planNames)
+                : ($subNumber ?: 'Subscription');
 
             $result[] = [
                 'id'                    => $id,
@@ -483,7 +553,6 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
 
         return $result;
     }
-
 
     /**
      * Helper: get entity manager from the DI container.
@@ -501,7 +570,7 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
         return $this->getContainer()->get('config');
     }
 
-        /**
+    /**
      * Format a Zuora date (YYYY-MM-DD or YYYY-MM-DDThh:mm:ss) as DD-MM-YYYY
      * for display in Espo.
      */
@@ -511,13 +580,10 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
             return null;
         }
 
-        // Match leading YYYY-MM-DD from either "YYYY-MM-DD" or "YYYY-MM-DDThh:mm:ss"
         if (preg_match('/^(\d{4})-(\d{2})-(\d{2})/', $date, $m)) {
             return $m[3] . '-' . $m[2] . '-' . $m[1]; // DD-MM-YYYY
         }
 
-        // Fallback: return as-is
         return $date;
     }
-
 }
