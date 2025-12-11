@@ -1,40 +1,67 @@
-{{!-- Action buttons (Change / Cancel) --}}
-<div class="pull-right" style="margin-bottom: 10px;">
-    {{#if activeSubscriptions.length}}
-            <button
+{{!-- Action buttons --}}
+<div class="pull-right" style="margin-bottom: 10px; text-align: right;">
+
+    <button
         type="button"
         class="btn btn-default btn-sm action-refresh-subscription-panel"
         {{#if loading}}disabled{{/if}}>
         Refresh
     </button>
-        
-        <button
-            type="button"
-            class="btn btn-default btn-sm action-change-subscription-panel">
-            Change Plan
-        </button>
 
-        <button
-            type="button"
-            class="btn btn-danger btn-sm action-cancel-subscription-panel">
-            Cancel Subscription
-        </button>
+    {{#if activeSubscriptions.length}}
+        <div style="margin-top: 5px;">
+            <strong>Change plan:</strong>
+            <button
+                type="button"
+                class="btn btn-primary btn-xs action-change-subscription-now">
+                Now
+            </button>
+            <button
+                type="button"
+                class="btn btn-primary btn-xs action-change-subscription-at-payment">
+                At next payment
+            </button>
+            <button
+                type="button"
+                class="btn btn-primary btn-xs action-change-subscription-at-renewal">
+                At renewal
+            </button>
+        </div>
+
+        <div style="margin-top: 5px;">
+            <strong>Cancel subscription:</strong>
+            <button
+                type="button"
+                class="btn btn-danger btn-xs action-cancel-subscription-immediate">
+                Immediately
+            </button>
+            <button
+                type="button"
+                class="btn btn-danger btn-xs action-cancel-subscription-next-payment">
+                At next payment
+            </button>
+            <button
+                type="button"
+                class="btn btn-danger btn-xs action-cancel-subscription-next-renewal">
+                At renewal
+            </button>
+        </div>
     {{else}}
-        <button
-            type="button"
-            class="btn btn-default btn-sm"
-            disabled>
-            Change Plan
-        </button>
-
-        <button
-            type="button"
-            class="btn btn-danger btn-sm"
-            disabled>
-            Cancel Subscription
-        </button>
+        <div style="margin-top: 5px;">
+            <strong>Change plan:</strong>
+            <button type="button" class="btn btn-primary btn-xs" disabled>Now</button>
+            <button type="button" class="btn btn-primary btn-xs" disabled>At next payment</button>
+            <button type="button" class="btn btn-primary btn-xs" disabled>At renewal</button>
+        </div>
+        <div style="margin-top: 5px;">
+            <strong>Cancel subscription:</strong>
+            <button type="button" class="btn btn-danger btn-xs" disabled>Immediately</button>
+            <button type="button" class="btn btn-danger btn-xs" disabled>At next payment</button>
+            <button type="button" class="btn btn-danger btn-xs" disabled>At renewal</button>
+        </div>
     {{/if}}
 </div>
+
 <div class="clearfix" style="margin-bottom: 10px;"></div>
 
 {{#if loading}}

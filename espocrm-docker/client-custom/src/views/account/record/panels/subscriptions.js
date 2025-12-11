@@ -4,9 +4,18 @@ define('custom:views/account/record/panels/subscriptions', ['views/record/panels
 
         template: 'custom:account/record/panels/subscriptions',
 
-        // Panel-level actions: one Change + one Cancel for all active subs
+        // Panel-level actions
         events: {
-            'click .action-change-subscription-panel': function (e) {
+            // Refresh
+            'click .action-refresh-subscription-panel': function (e) {
+                e.preventDefault();
+                this.loadSubscriptions();
+            },
+
+            // CHANGE PLAN actions
+            'click .action-change-subscription-now': function (e) {
+                e.preventDefault();
+
                 if (!this.activeSubscriptions || !this.activeSubscriptions.length) {
                     this.notify('No active subscriptions to change.', 'warning');
                     return;
@@ -17,12 +26,19 @@ define('custom:views/account/record/panels/subscriptions', ['views/record/panels
                     .map(s => s.zuora_subscription_id)
                     .filter(Boolean);
 
-                this.openPlanSelectDialog(subscriptionIds, zuoraSubscriptionIds);
+                // Effective immediately
+                this.openPlanSelectDialog(
+                    subscriptionIds,
+                    zuoraSubscriptionIds,
+                    'Immediate'
+                );
             },
 
-            'click .action-cancel-subscription-panel': function (e) {
+            'click .action-change-subscription-at-payment': function (e) {
+                e.preventDefault();
+
                 if (!this.activeSubscriptions || !this.activeSubscriptions.length) {
-                    this.notify('No active subscriptions to cancel.', 'warning');
+                    this.notify('No active subscriptions to change.', 'warning');
                     return;
                 }
 
@@ -31,24 +47,58 @@ define('custom:views/account/record/panels/subscriptions', ['views/record/panels
                     .map(s => s.zuora_subscription_id)
                     .filter(Boolean);
 
-                const atRenewal = window.confirm(
-                    'Cancel at renewal?\n\nOK = cancel at renewal\nCancel = cancel at next payment date'
+                // Change at next billing period / payment
+                this.openPlanSelectDialog(
+                    subscriptionIds,
+                    zuoraSubscriptionIds,
+                    'NextBillingPeriod'
                 );
-                const cancelPolicy = atRenewal ? 'EndOfTerm' : 'NextPayment';
+            },
 
-                if (!window.confirm('Are you sure you want to cancel the whole subscription?')) {
+            'click .action-change-subscription-at-renewal': function (e) {
+                e.preventDefault();
+
+                if (!this.activeSubscriptions || !this.activeSubscriptions.length) {
+                    this.notify('No active subscriptions to change.', 'warning');
                     return;
                 }
 
-                this.executeAction('cancel', {
-                    subscriptionIds: subscriptionIds,
-                    zuoraSubscriptionIds: zuoraSubscriptionIds,
-                    cancelPolicy: cancelPolicy
-                });
+                const subscriptionIds = this.activeSubscriptions.map(s => s.id);
+                const zuoraSubscriptionIds = this.activeSubscriptions
+                    .map(s => s.zuora_subscription_id)
+                    .filter(Boolean);
+
+                // Change at renewal / end of term
+                this.openPlanSelectDialog(
+                    subscriptionIds,
+                    zuoraSubscriptionIds,
+                    'EndOfTerm'
+                );
             },
-            'click .action-refresh-subscription-panel': function (e) {
+
+            // CANCEL actions
+            'click .action-cancel-subscription-immediate': function (e) {
                 e.preventDefault();
-                this.loadSubscriptions();
+                this.cancelSubscriptions(
+                    'Immediate',
+                    'Are you sure you want to cancel this subscription immediately?'
+                );
+            },
+
+            'click .action-cancel-subscription-next-payment': function (e) {
+                e.preventDefault();
+                this.cancelSubscriptions(
+                    'NextPayment',
+                    'Are you sure you want to cancel this subscription at the next payment date?'
+                );
+            },
+
+            'click .action-cancel-subscription-next-renewal': function (e) {
+                e.preventDefault();
+                this.cancelSubscriptions(
+                    'EndOfTerm',
+                    'Are you sure you want to cancel this subscription at the next renewal?'
+                );
             }
         },
 
@@ -71,6 +121,11 @@ define('custom:views/account/record/panels/subscriptions', ['views/record/panels
             this.previousSubscriptions = [];
             this.error = null;
 
+            // Auto-refresh when Zuora Account ID changes on the Account
+            this.listenTo(this.model, 'change:cZuoraAccountId', function () {
+                this.loadSubscriptions();
+            }, this);
+
             this.loadSubscriptions();
         },
 
@@ -89,16 +144,22 @@ define('custom:views/account/record/panels/subscriptions', ['views/record/panels
             this.error = null;
             this.reRender();
 
-            Espo.Ajax.postRequest('ZuoraSubscription/action/list', {
-                accountId: accountId,
-                zuoraAccountId: zuoraAccountId
-            })
+            const payload = {};
+
+            if (zuoraAccountId) {
+                payload.zuoraAccountId = zuoraAccountId;
+            }
+
+            if (accountId) {
+                payload.accountId = accountId;
+            }
+
+            Espo.Ajax.postRequest('ZuoraSubscription/action/list', payload)
                 .then(response => {
                     console.log('ZuoraSubscription list response:', response);
 
                     this.loading = false;
 
-                    // use what the controller returns
                     this.subscriptions = response.subscriptions || [];
 
                     const now = new Date();
@@ -129,8 +190,16 @@ define('custom:views/account/record/panels/subscriptions', ['views/record/panels
                 });
         },
 
-        openPlanSelectDialog: function (subscriptionIds, zuoraSubscriptionIds) {
+        /**
+         * Open plan selector for a given effectivePolicy.
+         *
+         * @param {Array} subscriptionIds
+         * @param {Array} zuoraSubscriptionIds
+         * @param {String} effectivePolicy  e.g. 'Immediate', 'NextBillingPeriod', 'EndOfTerm'
+         */
+        openPlanSelectDialog: function (subscriptionIds, zuoraSubscriptionIds, effectivePolicy) {
             const scope = 'CSubscriptionPlan';
+            const policy = effectivePolicy || 'Immediate';
 
             this.createView('selectPlan', 'views/modals/select-records', {
                 scope: scope,
@@ -143,23 +212,54 @@ define('custom:views/account/record/panels/subscriptions', ['views/record/panels
                     const planId = model.id;
                     const planCode = model.get('planCode') || model.get('plan_code') || null;
 
-                    const useNextBilling = window.confirm(
-                        'Apply plan change at next billing cycle?\n\nOK = Next billing\nCancel = Immediate'
-                    );
-                    const effectivePolicy = useNextBilling ? 'NextBillingPeriod' : 'Immediate';
+                    let summary = 'Are you sure you want to change the subscription';
+                    summary += '\n\nPlan: ' + (planCode || planId);
+                    summary += '\nPolicy: ' + policy;
+
+                    if (!window.confirm(summary)) {
+                        return;
+                    }
 
                     this.executeAction('change', {
                         subscriptionIds: subscriptionIds,
                         zuoraSubscriptionIds: zuoraSubscriptionIds,
                         planId: planId,
                         planCode: planCode,
-                        effectivePolicy: effectivePolicy
+                        effectivePolicy: policy
                     });
                 }, this);
             }.bind(this));
         },
 
-        // Calls ZuoraSubscription controller – now sending arrays
+        /**
+         * Helper to perform a cancel with a given policy.
+         *
+         * @param {String} cancelPolicy   'Immediate', 'NextPayment', 'EndOfTerm'
+         * @param {String} confirmMessage Message for confirm dialog
+         */
+        cancelSubscriptions: function (cancelPolicy, confirmMessage) {
+            if (!this.activeSubscriptions || !this.activeSubscriptions.length) {
+                this.notify('No active subscriptions to cancel.', 'warning');
+                return;
+            }
+
+            const subscriptionIds = this.activeSubscriptions.map(s => s.id);
+            const zuoraSubscriptionIds = this.activeSubscriptions
+                .map(s => s.zuora_subscription_id)
+                .filter(Boolean);
+
+            if (!window.confirm(confirmMessage)) {
+                return;
+            }
+
+            this.executeAction('cancel', {
+                subscriptionIds: subscriptionIds,
+                zuoraSubscriptionIds: zuoraSubscriptionIds,
+                cancelPolicy: cancelPolicy
+            });
+        },
+
+        // Calls ZuoraSubscription controller
         executeAction: function (action, payload) {
             const accountId = this.model.id;
             const zuoraAccountId = this.model.get('cZuoraAccountId') || null;
