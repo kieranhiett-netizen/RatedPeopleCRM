@@ -9,7 +9,7 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
     /**
      * Ensure user can edit Accounts.
      */
-    protected function checkAccess()
+    protected function checkAccess(): bool
     {
         if (!$this->getAcl()->checkScope('Account', 'edit')) {
             throw new Forbidden();
