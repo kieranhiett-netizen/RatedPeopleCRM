@@ -203,7 +203,7 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
     }
 
     /**
-     * Fetch subscription(s) from Zuora – STUB
+     * Fetch subscription(s) from Zuora
      * POST /api/v1/ZuoraSubscription/action/list
      */
     public function postActionList($params, $data, $request): array
@@ -258,7 +258,7 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
         return [
             'success'       => true,
             'subscriptions' => $subscriptions,
-            'message'       => 'Zuora fetch STUB for account ' . $zuoraAccountId,
+            'message'       => 'Zuora fetch for account ' . $zuoraAccountId,
         ];
     }
 
@@ -282,32 +282,173 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
     }
 
     /**
-     * Stubbed call to Zuora; aligns with what the JS panel expects.
+     * Get Zuora access token using client_credentials,
+     * configured in data/config.php:
+     *
+     * 'zuoraApiUrl'       => 'https://rest.sandbox.eu.zuora.com',
+     * 'zuoraClientId'     => '...',
+     * 'zuoraClientSecret' => '...'
+     */
+    protected function getZuoraAccessToken()
+    {
+        $config = $this->getConfig();
+
+        $baseUrl      = rtrim((string) $config->get('zuoraApiUrl'), '/');
+        $clientId     = $config->get('zuoraClientId');
+        $clientSecret = $config->get('zuoraClientSecret');
+
+        if (!$baseUrl || !$clientId || !$clientSecret) {
+            return null;
+        }
+
+        $url = $baseUrl . '/oauth/token';
+
+        $payload = http_build_query([
+            'grant_type'    => 'client_credentials',
+            'client_id'     => $clientId,
+            'client_secret' => $clientSecret,
+        ]);
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => $payload,
+            CURLOPT_HTTPHEADER     => [
+                'Content-Type: application/x-www-form-urlencoded',
+            ],
+            CURLOPT_TIMEOUT        => 30,
+        ]);
+
+        $raw   = curl_exec($ch);
+        $errno = curl_errno($ch);
+        $error = curl_error($ch);
+        curl_close($ch);
+
+        if ($errno !== 0 || $raw === false) {
+            // Optionally log error
+            return null;
+        }
+
+        $data = json_decode($raw, true);
+        if (!is_array($data) || empty($data['access_token'])) {
+            return null;
+        }
+
+        return $data['access_token'];
+    }
+
+    /**
+     * Call Zuora REST API to get subscriptions for an account.
+     *
+     * @param string $zuoraAccountId  Zuora Account ID or Account Number
+     * @return array                  Normalised subscriptions for the panel
      */
     protected function fetchSubscriptionsFromZuora($zuoraAccountId)
     {
-        // TODO: Replace this stub with a real Zuora REST API call.
-        // For now we return the same “Example Plan” row.
+        if (!$zuoraAccountId) {
+            return [];
+        }
 
-        return [
-            [
-                'id'                    => 'stub-sub-001',
-                'zuora_subscription_id' => 'ZSUB-stub-001',
-                'name'                  => 'Example Plan',
-                'status'                => 'Active',
-                'start_date'            => '2025-01-01',
-                'end_date'              => '2026-01-01',
-                'created_at'            => '2025-01-01',
+        $config = $this->getConfig();
+        $baseUrl = rtrim((string) $config->get('zuoraApiUrl'), '/');
+
+        if (!$baseUrl) {
+            return [];
+        }
+
+        $accessToken = $this->getZuoraAccessToken();
+        if (!$accessToken) {
+            return [];
+        }
+
+        // GET /v1/subscriptions/accounts/{account-key}
+        $url = $baseUrl . '/v1/subscriptions/accounts/' . rawurlencode($zuoraAccountId);
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER     => [
+                'Authorization: Bearer ' . $accessToken,
+                'Accept: application/json',
             ],
-        ];
+            CURLOPT_TIMEOUT        => 30,
+        ]);
+
+        $raw    = curl_exec($ch);
+        $errno  = curl_errno($ch);
+        $error  = curl_error($ch);
+        $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($errno !== 0 || $raw === false || $status >= 400) {
+            // Optionally log: $error / $status
+            return [];
+        }
+
+        $data = json_decode($raw, true);
+        if (!is_array($data)) {
+            return [];
+        }
+
+        // Handle both "subscriptions" wrapper and bare array
+        $subscriptionsRaw = [];
+        if (isset($data['subscriptions']) && is_array($data['subscriptions'])) {
+            $subscriptionsRaw = $data['subscriptions'];
+        } elseif (isset($data[0]) || empty($data)) {
+            $subscriptionsRaw = $data;
+        }
+
+        $result = [];
+
+        foreach ($subscriptionsRaw as $sub) {
+            if (!is_array($sub)) {
+                continue;
+            }
+
+            // Map Zuora fields to our panel’s expected shape.
+            $id        = $sub['id'] ?? ($sub['subscriptionNumber'] ?? null);
+            $subNumber = $sub['subscriptionNumber'] ?? $id;
+            $status    = $sub['status'] ?? ($sub['state'] ?? null);
+
+            $startDate = $sub['termStartDate']
+                ?? $sub['contractEffectiveDate']
+                ?? $sub['subscriptionStartDate']
+                ?? null;
+
+            $endDate   = $sub['termEndDate'] ?? null;
+            $createdAt = $sub['subscriptionStartDate'] ?? $startDate;
+
+            // You can later swap this to product / rate plan names
+            $name = $subNumber ?: 'Subscription';
+
+            $result[] = [
+                'id'                    => $id,
+                'zuora_subscription_id' => $subNumber,
+                'name'                  => $name,
+                'status'                => $status,
+                'start_date'            => $startDate,
+                'end_date'              => $endDate,
+                'created_at'            => $createdAt,
+            ];
+        }
+
+        return $result;
     }
 
     /**
      * Helper: get entity manager from the DI container.
-     * Fixes "Call to undefined method getEntityManager()".
      */
     protected function getEntityManager()
     {
         return $this->getContainer()->get('entityManager');
+    }
+
+    /**
+     * Helper: get config service.
+     */
+    protected function getConfig()
+    {
+        return $this->getContainer()->get('config');
     }
 }
