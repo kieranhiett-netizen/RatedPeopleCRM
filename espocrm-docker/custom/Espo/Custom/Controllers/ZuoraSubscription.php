@@ -55,7 +55,7 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
         $accountId       = $data->accountId ?? null;
         $zuoraAccountId  = $data->zuoraAccountId ?? null;
 
-        // Optionally resolve Zuora Account ID from Account if missing
+        // Optional: resolve Zuora Account ID from Account if missing
         if ($accountId && !$zuoraAccountId) {
             $zuoraAccountId = $this->resolveZuoraAccountIdFromAccount($accountId);
         }
@@ -114,7 +114,7 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
         $accountId      = $data->accountId ?? null;
         $zuoraAccountId = $data->zuoraAccountId ?? null;
 
-        // Optionally resolve Zuora Account ID from Account if missing
+        // Optional: resolve Zuora Account ID from Account if missing
         if ($accountId && !$zuoraAccountId) {
             $zuoraAccountId = $this->resolveZuoraAccountIdFromAccount($accountId);
         }
@@ -176,7 +176,6 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
             ];
         }
 
-        // If already linked to the same ID, just short-circuit
         if ($account->get('cZuoraAccountId') === $zuoraAccountId) {
             return [
                 'success' => true,
@@ -184,8 +183,7 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
             ];
         }
 
-        // TODO (optional): validate the Zuora Account actually exists
-        // by calling your Zuora client before saving.
+        // TODO (optional): validate Zuora Account exists before saving.
 
         $account->set('cZuoraAccountId', $zuoraAccountId);
         $entityManager->saveEntity($account);
@@ -227,40 +225,19 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
         $entityManager = $this->getEntityManager();
         $account = null;
 
-        // If we have accountId, load the Account entity
+        // If we have accountId, try to load Account entity,
+        // but don't throw if it fails – just continue with Zuora ID if present.
         if ($accountId) {
             $account = $entityManager->getEntity('Account', $accountId);
-
-            if (!$account) {
-                return [
-                    'success' => false,
-                    'message' => 'Account not found for id ' . $accountId,
-                ];
-            }
         }
 
         // If we have accountId but no Zuora ID — pull it from the Account entity
         if (!$zuoraAccountId && $account) {
             $zuoraAccountId = $account->get('cZuoraAccountId');
-
-            if (!$zuoraAccountId) {
-                return [
-                    'success'       => true,
-                    'subscriptions' => [],
-                    'message'       => 'Account has no cZuoraAccountId; nothing to fetch.',
-                ];
-            }
         }
 
-        // If we have both accountId and zuoraAccountId and the field is out of sync,
-        // update the Account so the link is persisted.
-        if ($account && $zuoraAccountId && $account->get('cZuoraAccountId') !== $zuoraAccountId) {
-            $account->set('cZuoraAccountId', $zuoraAccountId);
-            $entityManager->saveEntity($account);
-        }
-
+        // If still no Zuora ID, we cannot fetch subscriptions.
         if (!$zuoraAccountId) {
-            // Defensive guard, should not normally happen by here
             return [
                 'success'       => true,
                 'subscriptions' => [],
@@ -268,8 +245,15 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
             ];
         }
 
+        // If we have both account and Zuora ID and the field is out of sync,
+        // update the Account so the link is persisted. Failures here should
+        // not prevent us from returning subscriptions.
+        if ($account && $account->get('cZuoraAccountId') !== $zuoraAccountId) {
+            $account->set('cZuoraAccountId', $zuoraAccountId);
+            $entityManager->saveEntity($account);
+        }
+
         // At this point we always have a Zuora Account ID in $zuoraAccountId
-        // Replace this stub with a real Zuora REST call when ready.
         $subscriptions = $this->fetchSubscriptionsFromZuora($zuoraAccountId);
 
         return [
@@ -282,8 +266,12 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
     /**
      * Resolve Zuora Account ID from an Espo Account’s cZuoraAccountId field.
      */
-    protected function resolveZuoraAccountIdFromAccount(string $accountId): ?string
+    protected function resolveZuoraAccountIdFromAccount($accountId)
     {
+        if (!$accountId) {
+            return null;
+        }
+
         $entityManager = $this->getEntityManager();
         $account = $entityManager->getEntity('Account', $accountId);
 
@@ -296,25 +284,11 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
 
     /**
      * Stubbed call to Zuora; aligns with what your JS panel expects.
-     *
-     * Shape:
-     *  [
-     *      [
-     *          'id'                    => 'local-sub-id',
-     *          'zuora_subscription_id' => 'ZSUB-...',
-     *          'name'                  => 'Plan name',
-     *          'status'                => 'Active',
-     *          'start_date'            => 'YYYY-MM-DD',
-     *          'end_date'              => 'YYYY-MM-DD',
-     *          'created_at'            => 'YYYY-MM-DD',
-     *      ],
-     *      ...
-     *  ]
      */
-    protected function fetchSubscriptionsFromZuora(string $zuoraAccountId): array
+    protected function fetchSubscriptionsFromZuora($zuoraAccountId)
     {
         // TODO: Replace this stub with a real Zuora REST API call.
-        // For now we return the same “Example Plan” you already had.
+        // For now we return the same “Example Plan” row.
 
         return [
             [
