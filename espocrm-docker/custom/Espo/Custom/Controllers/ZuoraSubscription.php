@@ -7,9 +7,9 @@ use Espo\Core\Exceptions\Forbidden;
 class ZuoraSubscription extends \Espo\Core\Controllers\Base
 {
     /**
-     * Ensure user can edit Accounts (same as before).
+     * Ensure user can edit Accounts.
      */
-    protected function checkAccess(): bool
+    protected function checkAccess()
     {
         if (!$this->getAcl()->checkScope('Account', 'edit')) {
             throw new Forbidden();
@@ -19,8 +19,8 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
     }
 
     /**
-     * Change subscription(s) – still STUB
-     * Called by POST /api/v1/ZuoraSubscription/action/change
+     * Change subscription(s) – STUB
+     * POST /api/v1/ZuoraSubscription/action/change
      */
     public function postActionChange($params, $data, $request): array
     {
@@ -80,8 +80,8 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
     }
 
     /**
-     * Cancel subscription(s) – still STUB
-     * Called by POST /api/v1/ZuoraSubscription/action/cancel
+     * Cancel subscription(s) – STUB
+     * POST /api/v1/ZuoraSubscription/action/cancel
      */
     public function postActionCancel($params, $data, $request): array
     {
@@ -203,8 +203,8 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
     }
 
     /**
-     * Fetch subscription(s) from Zuora – currently STUB
-     * Called by POST /api/v1/ZuoraSubscription/action/list
+     * Fetch subscription(s) from Zuora – STUB
+     * POST /api/v1/ZuoraSubscription/action/list
      */
     public function postActionList($params, $data, $request): array
     {
@@ -226,7 +226,7 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
         $account = null;
 
         // If we have accountId, try to load Account entity,
-        // but don't throw if it fails – just continue with Zuora ID if present.
+        // but don't throw if it fails – we can still use Zuora ID only.
         if ($accountId) {
             $account = $entityManager->getEntity('Account', $accountId);
         }
@@ -246,8 +246,7 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
         }
 
         // If we have both account and Zuora ID and the field is out of sync,
-        // update the Account so the link is persisted. Failures here should
-        // not prevent us from returning subscriptions.
+        // update the Account so the link is persisted.
         if ($account && $account->get('cZuoraAccountId') !== $zuoraAccountId) {
             $account->set('cZuoraAccountId', $zuoraAccountId);
             $entityManager->saveEntity($account);
@@ -283,7 +282,7 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
     }
 
     /**
-     * Stubbed call to Zuora; aligns with what your JS panel expects.
+     * Stubbed call to Zuora; aligns with what the JS panel expects.
      */
     protected function fetchSubscriptionsFromZuora($zuoraAccountId)
     {
@@ -301,5 +300,14 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
                 'created_at'            => '2025-01-01',
             ],
         ];
+    }
+
+    /**
+     * Helper: get entity manager from the DI container.
+     * Fixes "Call to undefined method getEntityManager()".
+     */
+    protected function getEntityManager()
+    {
+        return $this->getContainer()->get('entityManager');
     }
 }
