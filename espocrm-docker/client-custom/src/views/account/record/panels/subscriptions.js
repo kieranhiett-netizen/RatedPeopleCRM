@@ -45,6 +45,10 @@ define('custom:views/account/record/panels/subscriptions', ['views/record/panels
                     zuoraSubscriptionIds: zuoraSubscriptionIds,
                     cancelPolicy: cancelPolicy
                 });
+            },
+            'click .action-refresh-subscription-panel': function (e) {
+                e.preventDefault();
+                this.loadSubscriptions();
             }
         },
 
@@ -127,7 +131,7 @@ define('custom:views/account/record/panels/subscriptions', ['views/record/panels
 
         openPlanSelectDialog: function (subscriptionIds, zuoraSubscriptionIds) {
             const scope = 'CSubscriptionPlan';
-            
+
             this.createView('selectPlan', 'views/modals/select-records', {
                 scope: scope,
                 multiple: false

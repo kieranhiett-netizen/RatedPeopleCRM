@@ -1,6 +1,13 @@
 {{!-- Action buttons (Change / Cancel) --}}
 <div class="pull-right" style="margin-bottom: 10px;">
     {{#if activeSubscriptions.length}}
+            <button
+        type="button"
+        class="btn btn-default btn-sm action-refresh-subscription-panel"
+        {{#if loading}}disabled{{/if}}>
+        Refresh
+    </button>
+        
         <button
             type="button"
             class="btn btn-default btn-sm action-change-subscription-panel">
