@@ -92,6 +92,9 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
     {
         $this->checkAccess();
 
+         // Account to attach the stream note to (if provided)
+    $accountId = $data->accountId ?? null;
+
         // 1) Normalise arrays coming from JS
         $subscriptionIds = $data->subscriptionIds ?? [];
         if (is_string($subscriptionIds)) {
@@ -210,7 +213,7 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
             ];
         }
 
-        // 5) Friendly message for Espo toast (no PHP 8 match; simple if/else)
+               // 5) Friendly message for Espo toast (no PHP 8 match; simple if/else)
         $humanPolicy = 'at renewal (end of term)';
         if ($uiPolicy === 'Immediate') {
             $humanPolicy = 'immediately';
@@ -228,6 +231,16 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
             $message = sprintf(
                 'One or more Zuora cancellations failed; %d attempted.',
                 count($zuoraSubscriptionIds)
+            );
+        }
+
+        // --- NEW: log to Account stream if we know the account ---
+        if ($overallSuccess && $accountId) {
+            $this->logAccountStreamCancellation(
+                $accountId,
+                $zuoraSubscriptionIds,
+                $uiPolicy,
+                $humanPolicy
             );
         }
 
@@ -376,6 +389,53 @@ class ZuoraSubscription extends \Espo\Core\Controllers\Base
         return $account->get('cZuoraAccountId') ?: null;
     }
 
+    /**
+     * Log a Zuora cancellation into the Account Stream.
+     *
+     * Appears on the Account "Stream" panel as a normal post.
+     *
+     * @param string $accountId
+     * @param array  $zuoraSubscriptionIds
+     * @param string $uiPolicy        "Immediate" | "NextPayment" | "EndOfTerm"
+     * @param string $humanPolicyText e.g. "immediately"
+     */
+    protected function logAccountStreamCancellation(
+        string $accountId,
+        array $zuoraSubscriptionIds,
+        string $uiPolicy,
+        string $humanPolicyText
+    ): void {
+        $entityManager = $this->getEntityManager();
+
+        // Create new Note entity (Stream entry)
+        $note = $entityManager->getEntity('Note'); // new empty entity
+
+        $note->set('parentType', 'Account');
+        $note->set('parentId', $accountId);
+        $note->set('type', 'Post');
+
+        $subList = implode(', ', $zuoraSubscriptionIds);
+
+        $postText = sprintf(
+            'Cancelled Zuora subscription(s) %s %s.',
+            $subList ?: '(unknown)',
+            $humanPolicyText
+        );
+
+        // Text shown in Stream
+        $note->set('post', $postText);
+
+        // Optional: internal-only
+        // $note->set('isInternal', true);
+
+        // Attribute to current user if available
+        $user = $this->getUser();
+        if ($user) {
+            $note->set('createdById', $user->id);
+        }
+
+        $entityManager->saveEntity($note);
+    }
     /**
      * Get Zuora access token using client_credentials,
      * configured in data/config.php.
