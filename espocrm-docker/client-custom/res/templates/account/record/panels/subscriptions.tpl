@@ -1,3 +1,35 @@
+{{!-- Action buttons (Change / Cancel) --}}
+<div class="pull-right" style="margin-bottom: 10px;">
+    {{#if activeSubscriptions.length}}
+        <button
+            type="button"
+            class="btn btn-default btn-sm action-change-subscription-panel">
+            Change Plan
+        </button>
+
+        <button
+            type="button"
+            class="btn btn-danger btn-sm action-cancel-subscription-panel">
+            Cancel Subscription
+        </button>
+    {{else}}
+        <button
+            type="button"
+            class="btn btn-default btn-sm"
+            disabled>
+            Change Plan
+        </button>
+
+        <button
+            type="button"
+            class="btn btn-danger btn-sm"
+            disabled>
+            Cancel Subscription
+        </button>
+    {{/if}}
+</div>
+<div class="clearfix" style="margin-bottom: 10px;"></div>
+
 {{#if loading}}
     <div class="text-muted">Loading subscriptions...</div>
 {{/if}}
@@ -63,7 +95,7 @@
                     <tbody>
                         {{#each previousSubscriptions}}
                             <tr>
-                                <td>{{name}}</td>
+                                <td>{{{name}}}</td>
                                 <td>{{start_date}}</td>
                                 <td>{{end_date}}</td>
                                 <td><span class="label label-default">{{status}}</span></td>
