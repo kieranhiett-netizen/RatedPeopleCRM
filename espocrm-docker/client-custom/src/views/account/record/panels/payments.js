@@ -51,28 +51,31 @@ define('custom:views/account/record/panels/payments', ['views/record/panels/bott
 
             const payload = {
                 accountId: accountId,
-                zuoraAccountId: zuoraAccountId,
-
-                  // ✅ TEMP DEBUG FLAG (remove after testing)
-    debug: true
+                zuoraAccountId: zuoraAccountId
+                // NOTE: do NOT send debug:true unless your controller returns payments in debug mode
             };
+
+            console.log('[ZuoraPayment] payload', payload);
 
             Espo.Ajax.postRequest('ZuoraPayment/action/list', payload)
                 .then(response => {
+                    console.log('[ZuoraPayment] response', response);
+
                     this.loading = false;
-                    this.payments = (response && response.payments) ? response.payments : [];
+                    this.payments = (response && Array.isArray(response.payments)) ? response.payments : [];
 
                     // Sort newest first (dateIso)
                     this.payments.sort((a, b) => {
-                        const da = a.dateIso ? new Date(a.dateIso) : new Date(0);
-                        const db = b.dateIso ? new Date(b.dateIso) : new Date(0);
+                        const da = a && a.dateIso ? new Date(a.dateIso) : new Date(0);
+                        const db = b && b.dateIso ? new Date(b.dateIso) : new Date(0);
                         return db - da;
                     });
 
                     this.reRender();
                 })
                 .catch(error => {
-                    console.error('Zuora payments fetch failed:', error);
+                    console.error('[ZuoraPayment] error', error);
+
                     this.loading = false;
                     this.error = 'Failed to load payments from Zuora';
                     this.reRender();
@@ -80,7 +83,7 @@ define('custom:views/account/record/panels/payments', ['views/record/panels/bott
         },
 
         /**
-         * Format ISO date as DD-Mmm-YYYY like your screenshot.
+         * Format ISO date as DD-Mmm-YYYY like the screenshot.
          */
         formatDisplayDate: function (iso) {
             if (!iso) return '';
