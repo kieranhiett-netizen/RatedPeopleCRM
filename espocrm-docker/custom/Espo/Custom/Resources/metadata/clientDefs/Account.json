@@ -11,6 +11,11 @@
         "name": "caseHistory",
         "label": "Case History",
         "view": "custom:views/account/record/panels/case-history"
+      },
+      {
+        "name": "payments",
+        "label": "Payment History",
+        "view": "custom:views/account/record/panels/payments"
       }
     ]
   }

@@ -54,5 +54,13 @@
     },
     "caseHistory": {
         "index": 11
+    },
+    "_tabBreak_5": {
+        "index": 12,
+        "tabBreak": true,
+        "tabLabel": "Payment History"
+    },
+    "payments": {
+        "index": 13
     }
 }
