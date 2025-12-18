@@ -15,13 +15,14 @@ class ZuoraPayment extends \Espo\Core\Controllers\Base
     }
 
     /**
-     * List payments for an account using ZOQL:
+     * List payments for an account (ZOQL) and enrich with PaymentMethod details.
+     *
      * POST /api/v1/ZuoraPayment/action/list
      *
      * Payload:
-     *  - accountId (optional)
+     *  - accountId (optional, Espo Account id)
      *  - zuoraAccountId (preferred: Zuora Account UUID)
-     *  - debug (optional boolean) -> returns request/response diagnostics
+     *  - debug (optional boolean) -> includes request/response diagnostics
      */
     public function postActionList($params, $data, $request): array
     {
@@ -64,103 +65,257 @@ class ZuoraPayment extends \Espo\Core\Controllers\Base
             ];
         }
 
-        // ✅ IMPORTANT: ZOQL does NOT support ORDER BY.
-        // Sort in JS (you already do).
-        $safeId = str_replace("'", "\\'", (string) $zuoraAccountId);
+        // ---- 1) Fetch Payments (ZOQL) ----
+        $safeAccountId = $this->escapeZoqlString((string) $zuoraAccountId);
 
-        $queryString =
+        // NOTE: Your Zuora UI accepted ORDER BY, but we can still sort client-side anyway.
+        // Keep query minimal + reliable.
+        $paymentQuery =
             "select Id, PaymentNumber, Amount, Status, EffectiveDate, CreatedDate, PaymentMethodId, GatewayResponse " .
-            "from Payment where AccountId = '" . $safeId . "'";
+            "from Payment where AccountId = '" . $safeAccountId . "'";
 
-        $url  = $zuoraApiUrl . '/v1/action/query';
-        $body = ['queryString' => $queryString];
+        $paymentsUrl  = $zuoraApiUrl . '/v1/action/query';
+        $paymentsBody = ['queryString' => $paymentQuery];
 
-        $resp = $this->zuoraRequest('POST', $url, $accessToken, $body);
+        $paymentsResp = $this->zuoraRequest('POST', $paymentsUrl, $accessToken, $paymentsBody);
+        $paymentsRaw  = (string) ($paymentsResp['body'] ?? '');
+        $paymentsJson = json_decode($paymentsRaw, true);
 
-        $raw = (string) ($resp['body'] ?? '');
-        $json = json_decode($raw, true);
-
-        if ($debug) {
-            return [
-                'success'  => true,
-                'payments' => [],
-                'message'  => 'Zuora payments debug (ZOQL) for account ' . $zuoraAccountId,
-                'debug'    => [
-                    'request' => [
-                        'method'     => 'POST',
-                        'url'        => $url,
-                        'queryString'=> $queryString,
-                    ],
-                    'response' => [
-                        'ok'         => $resp['ok'],
-                        'httpStatus' => $resp['httpStatus'],
-                        'curlErrNo'  => $resp['curlErrNo'],
-                        'curlError'  => $resp['curlError'],
-                        'bodyPreview'=> mb_substr($raw, 0, 4000),
-                    ],
-                ],
-            ];
-        }
-
-        // Transport failure
-        if (!$resp['ok'] || !is_array($json)) {
+        // Transport-level failure
+        if (!$paymentsResp['ok'] || !is_array($paymentsJson)) {
             return [
                 'success'  => false,
                 'payments' => [],
-                'message'  => 'Zuora payments query failed (HTTP ' . (int) $resp['httpStatus'] . ').',
+                'message'  => 'Zuora payments query failed (HTTP ' . (int) $paymentsResp['httpStatus'] . ').',
+                'debug'    => $debug ? $this->buildDebugBlock('POST', $paymentsUrl, $paymentQuery, $paymentsResp, $paymentsRaw) : null,
             ];
         }
 
-        // ZOQL can still return faults; if "FaultCode" exists, treat as error
-        if (!empty($json['FaultCode'])) {
+        // Fault-level failure
+        if (!empty($paymentsJson['FaultCode'])) {
             return [
                 'success'  => false,
                 'payments' => [],
-                'message'  => 'Zuora query error: ' . ($json['FaultMessage'] ?? $json['FaultCode']),
+                'message'  => 'Zuora query error: ' . ($paymentsJson['FaultMessage'] ?? $paymentsJson['FaultCode']),
+                'debug'    => $debug ? $this->buildDebugBlock('POST', $paymentsUrl, $paymentQuery, $paymentsResp, $paymentsRaw) : null,
             ];
         }
 
-        // ZOQL query response typically has "records"
-        $records = $json['records'] ?? [];
+        $records = $paymentsJson['records'] ?? [];
         if (!is_array($records)) {
             $records = [];
         }
 
-        // Build output for your panel
-        $payments = [];
+        // ---- 2) Collect PaymentMethodIds ----
+        $paymentMethodIds = [];
         foreach ($records as $p) {
-            if (!is_array($p)) continue;
+            if (!is_array($p)) {
+                continue;
+            }
+            if (!empty($p['PaymentMethodId'])) {
+                $paymentMethodIds[] = (string) $p['PaymentMethodId'];
+            }
+        }
+        $paymentMethodIds = array_values(array_unique($paymentMethodIds));
+
+        // ---- 3) Fetch PaymentMethod details in bulk (ZOQL) ----
+        $paymentMethodsById = [];
+        $paymentMethodDebug = [];
+
+        if (!empty($paymentMethodIds)) {
+            $pmFetch = $this->fetchPaymentMethodsByIds($paymentMethodIds, $zuoraApiUrl, $accessToken, $debug);
+            $paymentMethodsById = $pmFetch['map'];
+            if ($debug && !empty($pmFetch['debug'])) {
+                $paymentMethodDebug = $pmFetch['debug'];
+            }
+        }
+
+        // ---- 4) Build output ----
+        $payments = [];
+
+        foreach ($records as $p) {
+            if (!is_array($p)) {
+                continue;
+            }
+
+            $pmId = $p['PaymentMethodId'] ?? null;
+            $pm   = ($pmId && isset($paymentMethodsById[$pmId])) ? $paymentMethodsById[$pmId] : null;
 
             $payments[] = [
-                'payment'      => $p['PaymentNumber'] ?? ($p['Id'] ?? null),
-                'cardholder'   => null, // optional later (from PaymentMethod lookup)
-                'amount'       => $p['Amount'] ?? null,
-                'gateway'      => $p['GatewayResponse'] ?? null,
-                'status'       => $p['Status'] ?? null,
-                'dateIso'      => $this->toIsoDate($p['EffectiveDate'] ?? ($p['CreatedDate'] ?? null)),
-                'method'       => $p['PaymentMethodId'] ?? null, // optional later format
-                'expiration'   => null, // optional later
-                'zuoraPaymentId' => $p['Id'] ?? null,
+                'payment'         => $p['PaymentNumber'] ?? ($p['Id'] ?? null),
+                'cardholder'      => $pm ? $this->extractPaymentMethodCardholder($pm) : null,
+                'amount'          => $p['Amount'] ?? null,
+                'gateway'         => $p['GatewayResponse'] ?? null,
+                'status'          => $p['Status'] ?? null,
+                'dateIso'         => $this->toIsoDate($p['EffectiveDate'] ?? ($p['CreatedDate'] ?? null)),
+                'method'          => $pm ? $this->formatPaymentMethodDisplay($pm) : ($pmId ?: null),
+                'expiration'      => $pm ? $this->formatPaymentMethodExpiry($pm) : null,
+
+                // keep IDs for future expansion / debugging
+                'zuoraPaymentId'  => $p['Id'] ?? null,
+                'paymentMethodId' => $pmId,
             ];
         }
 
-        return [
+        $response = [
             'success'  => true,
             'payments' => $payments,
             'message'  => 'Zuora payments fetch for account ' . $zuoraAccountId,
         ];
+
+        // ---- Debug block (includes BOTH payments + debug) ----
+        if ($debug) {
+            $response['debug'] = [
+                'paymentsQuery' => $this->buildDebugBlock('POST', $paymentsUrl, $paymentQuery, $paymentsResp, $paymentsRaw),
+                'paymentMethodQueries' => $paymentMethodDebug,
+                'counts' => [
+                    'payments' => count($records),
+                    'paymentMethodIds' => count($paymentMethodIds),
+                    'paymentMethodsFetched' => count($paymentMethodsById),
+                ],
+            ];
+        }
+
+        return $response;
     }
 
     protected function resolveZuoraAccountIdFromAccount($accountId)
     {
-        if (!$accountId) return null;
+        if (!$accountId) {
+            return null;
+        }
 
         $em = $this->getEntityManager();
         $account = $em->getEntity('Account', $accountId);
 
-        if (!$account) return null;
+        if (!$account) {
+            return null;
+        }
 
         return $account->get('cZuoraAccountId') ?: null;
+    }
+
+    /**
+     * Bulk fetch PaymentMethods by ID using ZOQL.
+     *
+     * Returns:
+     *  - map: [paymentMethodId => paymentMethodRecord]
+     *  - debug: list of per-chunk debug blocks (if $debug true)
+     */
+    protected function fetchPaymentMethodsByIds(array $ids, string $zuoraApiUrl, string $accessToken, bool $debug = false): array
+    {
+        $map = [];
+        $debugBlocks = [];
+
+        // Chunk to avoid overly long query strings
+        $chunks = array_chunk($ids, 50);
+
+        foreach ($chunks as $chunk) {
+            $safeIds = array_map(function ($id) {
+                return "'" . $this->escapeZoqlString((string) $id) . "'";
+            }, $chunk);
+
+            // Field set is "best effort". If your tenant complains, paste the fault and we’ll narrow.
+            $pmQuery =
+                "select Id, Type, CreditCardType, CreditCardMaskNumber, " .
+                "CreditCardExpirationMonth, CreditCardExpirationYear, " .
+                "CreditCardHolderName, BankTransferAccountName " .
+                "from PaymentMethod where Id in (" . implode(',', $safeIds) . ")";
+
+            $url  = rtrim($zuoraApiUrl, '/') . '/v1/action/query';
+            $body = ['queryString' => $pmQuery];
+
+            $resp = $this->zuoraRequest('POST', $url, $accessToken, $body);
+            $raw  = (string) ($resp['body'] ?? '');
+            $json = json_decode($raw, true);
+
+            if ($debug) {
+                $debugBlocks[] = $this->buildDebugBlock('POST', $url, $pmQuery, $resp, $raw);
+            }
+
+            if (!$resp['ok'] || !is_array($json)) {
+                continue;
+            }
+
+            if (!empty($json['FaultCode'])) {
+                continue;
+            }
+
+            $records = $json['records'] ?? [];
+            if (!is_array($records)) {
+                continue;
+            }
+
+            foreach ($records as $pm) {
+                if (!is_array($pm) || empty($pm['Id'])) {
+                    continue;
+                }
+                $map[(string) $pm['Id']] = $pm;
+            }
+        }
+
+        return [
+            'map' => $map,
+            'debug' => $debugBlocks,
+        ];
+    }
+
+    protected function formatPaymentMethodDisplay(array $pm): ?string
+    {
+        // Most likely path: credit card
+        $mask = $pm['CreditCardMaskNumber'] ?? null;
+        $cardType = $pm['CreditCardType'] ?? null;
+
+        if ($mask || $cardType) {
+            $parts = [];
+            $parts[] = 'Credit Card';
+            if ($cardType) {
+                $parts[] = (string) $cardType;
+            }
+            if ($mask) {
+                $parts[] = (string) $mask;
+            }
+            return implode(' ', $parts);
+        }
+
+        // Fallback to Type if present
+        if (!empty($pm['Type'])) {
+            return (string) $pm['Type'];
+        }
+
+        return null;
+    }
+
+    protected function formatPaymentMethodExpiry(array $pm): ?string
+    {
+        $m = $pm['CreditCardExpirationMonth'] ?? null;
+        $y = $pm['CreditCardExpirationYear'] ?? null;
+
+        if ($m === null || $y === null || $m === '' || $y === '') {
+            return null;
+        }
+
+        $mm = str_pad((string) $m, 2, '0', STR_PAD_LEFT);
+        return $mm . '/' . (string) $y;
+    }
+
+    protected function extractPaymentMethodCardholder(array $pm): ?string
+    {
+        if (!empty($pm['CreditCardHolderName'])) {
+            return (string) $pm['CreditCardHolderName'];
+        }
+        if (!empty($pm['BankTransferAccountName'])) {
+            return (string) $pm['BankTransferAccountName'];
+        }
+        return null;
+    }
+
+    /**
+     * Escape for safe inclusion inside a ZOQL single-quoted string.
+     */
+    protected function escapeZoqlString(string $value): string
+    {
+        return str_replace("'", "\\'", $value);
     }
 
     /**
@@ -201,6 +356,29 @@ class ZuoraPayment extends \Espo\Core\Controllers\Base
             'curlError'  => $errMsg ?: null,
             'body'       => ($raw === false ? null : $raw),
         ];
+    }
+
+    protected function buildDebugBlock(string $method, string $url, ?string $queryString, array $resp, string $raw): array
+    {
+        $block = [
+            'request' => [
+                'method' => $method,
+                'url'    => $url,
+            ],
+            'response' => [
+                'ok'         => $resp['ok'] ?? false,
+                'httpStatus' => $resp['httpStatus'] ?? null,
+                'curlErrNo'  => $resp['curlErrNo'] ?? null,
+                'curlError'  => $resp['curlError'] ?? null,
+                'bodyPreview'=> mb_substr($raw, 0, 4000),
+            ],
+        ];
+
+        if ($queryString !== null) {
+            $block['request']['queryString'] = $queryString;
+        }
+
+        return $block;
     }
 
     protected function toIsoDate($value): ?string
@@ -244,8 +422,8 @@ class ZuoraPayment extends \Espo\Core\Controllers\Base
             CURLOPT_TIMEOUT        => 30,
         ]);
 
-        $raw   = curl_exec($ch);
-        $errno = curl_errno($ch);
+        $raw    = curl_exec($ch);
+        $errno  = curl_errno($ch);
         $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
