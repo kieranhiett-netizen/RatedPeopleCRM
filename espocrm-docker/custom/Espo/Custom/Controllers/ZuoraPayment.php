@@ -54,117 +54,101 @@ class ZuoraPayment extends \Espo\Core\Controllers\Base
      * Fetch payments + enrich with payment method info (cardholder/masked/expiry).
      */
     protected function fetchPaymentsFromZuora(string $zuoraAccountId): array
-    {
-        $config  = $this->getConfig();
-        $baseUrl = rtrim((string) $config->get('zuoraApiUrl'), '/');
-        if (!$baseUrl) {
-            return [];
+{
+    $config  = $this->getConfig();
+    $baseUrl = rtrim((string) $config->get('zuoraApiUrl'), '/');
+    if (!$baseUrl) return [];
+
+    $accessToken = $this->getZuoraAccessToken();
+    if (!$accessToken) return [];
+
+    // ✅ Preferred endpoint: GET /v1/payments/accounts/{account-key}
+    $payResp = $this->zuoraRequest(
+        'GET',
+        $baseUrl . '/v1/payments/accounts/' . rawurlencode($zuoraAccountId),
+        $accessToken,
+        null,
+        ['Zuora-Version: 211.0']
+    );
+
+    if (!$payResp['ok']) {
+        // Temporary debug to see what Zuora said (remove later)
+        return [];
+    }
+
+    $json = json_decode($payResp['body'], true);
+    if (!is_array($json)) return [];
+
+    // Zuora often returns { success: true, payments: [...] }
+    $records = [];
+    if (!empty($json['payments']) && is_array($json['payments'])) {
+        $records = $json['payments'];
+    } elseif (!empty($json['records']) && is_array($json['records'])) {
+        $records = $json['records'];
+    }
+
+    if (empty($records)) {
+        return [];
+    }
+
+    // Collect payment method ids
+    $paymentMethodIds = [];
+    foreach ($records as $p) {
+        if (is_array($p) && !empty($p['paymentMethodId'])) {
+            $paymentMethodIds[(string)$p['paymentMethodId']] = true;
         }
+    }
+    $paymentMethodIds = array_keys($paymentMethodIds);
 
-        $accessToken = $this->getZuoraAccessToken();
-        if (!$accessToken) {
-            return [];
-        }
-
-        // 1) Query payments for AccountId (UUID)
-        $zoql =
-            "select Id, PaymentNumber, Status, Amount, EffectiveDate, CreatedDate, GatewayResponse, PaymentMethodId " .
-            "from Payment " .
-            "where AccountId = '" . addslashes($zuoraAccountId) . "' " .
-            "order by CreatedDate desc";
-
-        $queryResp = $this->zuoraRequest(
-            'POST',
-            $baseUrl . '/v1/action/query',
+    // Fetch payment methods once
+    $paymentMethodsById = [];
+    foreach ($paymentMethodIds as $pmId) {
+        $pmResp = $this->zuoraRequest(
+            'GET',
+            $baseUrl . '/v1/payment-methods/' . rawurlencode($pmId),
             $accessToken,
-            json_encode(['queryString' => $zoql]),
+            null,
             ['Zuora-Version: 211.0']
         );
+        if (!$pmResp['ok']) continue;
 
-        if (!$queryResp['ok']) {
-            return [];
-        }
-
-        $json = json_decode($queryResp['body'], true);
-        if (!is_array($json)) {
-            return [];
-        }
-
-        $records = $json['records'] ?? [];
-        if (!is_array($records)) {
-            $records = [];
-        }
-
-        // 2) Collect paymentMethodIds so we can hydrate card details
-        $paymentMethodIds = [];
-        foreach ($records as $p) {
-            if (is_array($p) && !empty($p['PaymentMethodId'])) {
-                $paymentMethodIds[(string) $p['PaymentMethodId']] = true;
-            }
-        }
-        $paymentMethodIds = array_keys($paymentMethodIds);
-
-        // 3) Fetch each payment method once
-        $paymentMethodsById = [];
-        foreach ($paymentMethodIds as $pmId) {
-            $pmResp = $this->zuoraRequest(
-                'GET',
-                $baseUrl . '/v1/payment-methods/' . rawurlencode($pmId),
-                $accessToken,
-                null,
-                ['Zuora-Version: 211.0']
-            );
-
-            if (!$pmResp['ok']) {
-                continue;
-            }
-
-            $pmJson = json_decode($pmResp['body'], true);
-            if (!is_array($pmJson)) {
-                continue;
-            }
-
+        $pmJson = json_decode($pmResp['body'], true);
+        if (is_array($pmJson)) {
             $paymentMethodsById[$pmId] = $pmJson;
         }
-
-        // 4) Normalise into UI rows
-        $out = [];
-        foreach ($records as $p) {
-            if (!is_array($p)) {
-                continue;
-            }
-
-            $pmId = (string)($p['PaymentMethodId'] ?? '');
-            $pm   = $pmId && isset($paymentMethodsById[$pmId]) ? $paymentMethodsById[$pmId] : null;
-
-            $cardholder  = $this->pickCardholderName($pm);
-            $methodLabel = $this->formatPaymentMethodLabel($pm);
-            $expiry      = $this->formatCardExpiry($pm);
-
-            $gateway = $this->summariseGateway($p['GatewayResponse'] ?? null);
-
-            $out[] = [
-                // Columns matching your screenshot/table
-                'payment'    => $p['PaymentNumber'] ?? ($p['Id'] ?? null),
-                'cardholder' => $cardholder,
-                'amount'     => $p['Amount'] ?? null,
-                'gateway'    => $gateway,
-                'status'     => $p['Status'] ?? null,
-
-                // Prefer EffectiveDate for “Date” column; fallback to CreatedDate
-                'dateIso'    => $this->toIsoDate($p['EffectiveDate'] ?? null) ?: $this->toIsoDate($p['CreatedDate'] ?? null),
-
-                'method'     => $methodLabel,
-                'expiration' => $expiry,
-
-                // Useful hidden ids for future drilldowns
-                'zuoraPaymentId'       => $p['Id'] ?? null,
-                'zuoraPaymentMethodId' => $pmId ?: null,
-            ];
-        }
-
-        return $out;
     }
+
+    // Normalise
+    $out = [];
+    foreach ($records as $p) {
+        if (!is_array($p)) continue;
+
+        $pmId = (string)($p['paymentMethodId'] ?? '');
+        $pm   = $pmId && isset($paymentMethodsById[$pmId]) ? $paymentMethodsById[$pmId] : null;
+
+        $out[] = [
+            'payment'    => $p['paymentNumber'] ?? ($p['id'] ?? null),
+            'cardholder' => $this->pickCardholderName($pm),
+            'amount'     => $p['amount'] ?? null,
+            'gateway'    => $this->summariseGateway($p['gatewayResponse'] ?? null),
+            'status'     => $p['status'] ?? null,
+            'dateIso'    => $this->toIsoDate($p['effectiveDate'] ?? null) ?: $this->toIsoDate($p['createdDate'] ?? null),
+            'method'     => $this->formatPaymentMethodLabel($pm),
+            'expiration' => $this->formatCardExpiry($pm),
+
+            'zuoraPaymentId'       => $p['id'] ?? null,
+            'zuoraPaymentMethodId' => $pmId ?: null,
+        ];
+    }
+
+    // Sort newest first (server-side)
+    usort($out, function ($a, $b) {
+        return strcmp((string)($b['dateIso'] ?? ''), (string)($a['dateIso'] ?? ''));
+    });
+
+    return $out;
+}
+
 
     /**
      * Attempt to extract a clean "Gateway" summary from GatewayResponse.
