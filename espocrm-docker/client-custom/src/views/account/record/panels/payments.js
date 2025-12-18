@@ -51,7 +51,10 @@ define('custom:views/account/record/panels/payments', ['views/record/panels/bott
 
             const payload = {
                 accountId: accountId,
-                zuoraAccountId: zuoraAccountId
+                zuoraAccountId: zuoraAccountId,
+
+                  // ✅ TEMP DEBUG FLAG (remove after testing)
+    debug: true
             };
 
             Espo.Ajax.postRequest('ZuoraPayment/action/list', payload)
