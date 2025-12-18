@@ -6,27 +6,21 @@ use Espo\Core\Exceptions\Forbidden;
 
 class ZuoraPayment extends \Espo\Core\Controllers\Base
 {
-    /**
-     * Ensure user can read Accounts (or edit if you prefer stricter).
-     */
     protected function checkAccess(): bool
     {
-        // Read is enough to view panels; change to 'edit' if needed.
         if (!$this->getAcl()->checkScope('Account', 'read')) {
             throw new Forbidden();
         }
-
         return true;
     }
 
     /**
-     * List payments for a Zuora account.
      * POST /api/v1/ZuoraPayment/action/list
      *
      * Payload:
      *  - accountId (optional)
-     *  - zuoraAccountId (preferred; UUID like 8adc...)
-     *  - debug (optional boolean) -> return debug block + body preview
+     *  - zuoraAccountId (preferred)
+     *  - debug (optional boolean)
      */
     public function postActionList($params, $data, $request): array
     {
@@ -36,7 +30,6 @@ class ZuoraPayment extends \Espo\Core\Controllers\Base
         $zuoraAccountId = $data->zuoraAccountId ?? null;
         $debug          = !empty($data->debug);
 
-        // If missing, try to resolve from Account.cZuoraAccountId
         if (!$zuoraAccountId && $accountId) {
             $zuoraAccountId = $this->resolveZuoraAccountIdFromAccount($accountId);
         }
@@ -69,53 +62,70 @@ class ZuoraPayment extends \Espo\Core\Controllers\Base
             ];
         }
 
-        // ✅ Preferred endpoint for payments-by-account
-        // GET /v1/payments/accounts/{account-key}
-        $url  = $zuoraApiUrl . '/v1/payments/accounts/' . rawurlencode((string) $zuoraAccountId);
-        $resp = $this->zuoraRequest('GET', $url, $accessToken, null);
+        // ✅ ZOQL query for payments by AccountId (Zuora UUID)
+        // NOTE: field names are standard ZOQL; if your tenant differs, debug will show it.
+        $queryString = sprintf(
+            "select Id, PaymentNumber, Amount, Status, EffectiveDate, CreatedDate, PaymentMethodId, GatewayResponse " .
+            "from Payment where AccountId = '%s' order by CreatedDate desc",
+            str_replace("'", "\\'", (string) $zuoraAccountId)
+        );
 
-        // Server-side log (never includes token)
-        $this->logDebug('Payments fetch response', [
+        $queryUrl = $zuoraApiUrl . '/v1/action/query';
+
+        $resp = $this->zuoraRequest(
+            'POST',
+            $queryUrl,
+            $accessToken,
+            ['queryString' => $queryString]
+        );
+
+        $this->logDebug('Payments ZOQL query response', [
             'zuoraAccountId' => (string) $zuoraAccountId,
             'httpStatus'     => $resp['httpStatus'],
             'curlErrNo'      => $resp['curlErrNo'],
             'curlError'      => $resp['curlError'],
-            'url'            => $resp['url'],
         ]);
 
-        // Debug mode: return diagnostics + body preview
+        $rawBody = (string) ($resp['body'] ?? '');
+        $json    = json_decode($rawBody, true);
+
+        // Debug response: show what Zuora returned (preview)
         if ($debug) {
-            $raw = (string) ($resp['body'] ?? '');
+            $zuoraSuccess = is_array($json) && array_key_exists('success', $json) ? (bool) $json['success'] : null;
+
             return [
                 'success'  => true,
                 'payments' => [],
-                'message'  => 'Zuora payments debug for account ' . $zuoraAccountId,
+                'message'  => 'Zuora payments debug (ZOQL) for account ' . $zuoraAccountId,
                 'debug'    => [
-                    'request'  => [
-                        'method' => $resp['method'],
-                        'url'    => $resp['url'],
+                    'request' => [
+                        'method'     => $resp['method'],
+                        'url'        => $resp['url'],
+                        'queryString'=> $queryString,
                     ],
                     'response' => [
-                        'ok'         => $resp['ok'],
-                        'httpStatus' => $resp['httpStatus'],
-                        'curlErrNo'  => $resp['curlErrNo'],
-                        'curlError'  => $resp['curlError'],
-                        'bodyPreview'=> mb_substr($raw, 0, 4000),
+                        'ok'           => $resp['ok'],
+                        'httpStatus'   => $resp['httpStatus'],
+                        'curlErrNo'    => $resp['curlErrNo'],
+                        'curlError'    => $resp['curlError'],
+                        'zuoraSuccess' => $zuoraSuccess,
+                        'reasons'      => is_array($json) ? ($json['reasons'] ?? null) : null,
+                        'bodyPreview'  => mb_substr($rawBody, 0, 4000),
                     ],
                 ],
             ];
         }
 
+        // Network-level failure
         if (!$resp['ok']) {
-            // Important: don’t silently show “no payments found” if Zuora errored
             return [
                 'success'  => false,
                 'payments' => [],
-                'message'  => 'Zuora payments fetch failed (see server logs). HTTP ' . (int) $resp['httpStatus'],
+                'message'  => 'Zuora payments query failed (HTTP ' . (int) $resp['httpStatus'] . '). See server logs.',
             ];
         }
 
-        $json = json_decode((string) $resp['body'], true);
+        // JSON parse failure
         if (!is_array($json)) {
             return [
                 'success'  => false,
@@ -124,16 +134,31 @@ class ZuoraPayment extends \Espo\Core\Controllers\Base
             ];
         }
 
-        // Zuora commonly returns: { "success": true, "payments": [ ... ] }
-        $paymentsRaw = [];
-        if (!empty($json['payments']) && is_array($json['payments'])) {
-            $paymentsRaw = $json['payments'];
-        } elseif (!empty($json['records']) && is_array($json['records'])) {
-            // fallback for other shapes
-            $paymentsRaw = $json['records'];
+        // Zuora-level failure (can still be HTTP 200)
+        if (isset($json['success']) && $json['success'] === false) {
+            $reasonMsg = $json['reasons'][0]['message'] ?? 'Unknown Zuora error';
+            $this->logDebug('Zuora returned success:false for payments query', [
+                'zuoraAccountId' => (string) $zuoraAccountId,
+                'reason'         => $reasonMsg,
+                'reasons'        => $json['reasons'] ?? null,
+            ]);
+
+            return [
+                'success'  => false,
+                'payments' => [],
+                'message'  => 'Zuora error: ' . $reasonMsg,
+            ];
         }
 
-        if (empty($paymentsRaw)) {
+        // Records can be in "records" (common) or sometimes "results"
+        $records = [];
+        if (!empty($json['records']) && is_array($json['records'])) {
+            $records = $json['records'];
+        } elseif (!empty($json['results']) && is_array($json['results'])) {
+            $records = $json['results'];
+        }
+
+        if (empty($records)) {
             return [
                 'success'  => true,
                 'payments' => [],
@@ -141,16 +166,18 @@ class ZuoraPayment extends \Espo\Core\Controllers\Base
             ];
         }
 
-        // Collect payment method ids so we can enrich method/expiry/cardholder
+        // Fetch payment methods to enrich cardholder/method/expiry
         $pmIds = [];
-        foreach ($paymentsRaw as $p) {
-            if (is_array($p) && !empty($p['paymentMethodId'])) {
+        foreach ($records as $p) {
+            if (is_array($p) && !empty($p['PaymentMethodId'])) {
+                $pmIds[(string) $p['PaymentMethodId']] = true;
+            } elseif (is_array($p) && !empty($p['paymentMethodId'])) {
+                // fallback if Zuora returns lower-cased keys
                 $pmIds[(string) $p['paymentMethodId']] = true;
             }
         }
         $pmIds = array_keys($pmIds);
 
-        // Fetch payment methods (small N) — good enough for now
         $pmById = [];
         foreach ($pmIds as $pmId) {
             $pmUrl  = $zuoraApiUrl . '/v1/payment-methods/' . rawurlencode((string) $pmId);
@@ -166,41 +193,43 @@ class ZuoraPayment extends \Espo\Core\Controllers\Base
                 continue;
             }
 
-            $pmJson = json_decode((string) $pmResp['body'], true);
+            $pmJson = json_decode((string) ($pmResp['body'] ?? ''), true);
             if (is_array($pmJson)) {
                 $pmById[$pmId] = $pmJson;
             }
         }
 
+        // Normalise for your UI
         $result = [];
-        foreach ($paymentsRaw as $p) {
-            if (!is_array($p)) {
-                continue;
-            }
+        foreach ($records as $p) {
+            if (!is_array($p)) continue;
 
-            $pmId = (string) ($p['paymentMethodId'] ?? '');
-            $pm   = ($pmId && isset($pmById[$pmId])) ? $pmById[$pmId] : null;
+            // Zuora can return keys as PaymentNumber/Amount or lower-case depending on endpoint
+            $paymentNumber = $p['PaymentNumber'] ?? ($p['paymentNumber'] ?? ($p['Id'] ?? ($p['id'] ?? null)));
+            $amount        = $p['Amount'] ?? ($p['amount'] ?? null);
+            $status        = $p['Status'] ?? ($p['status'] ?? null);
+            $effectiveDate = $p['EffectiveDate'] ?? ($p['effectiveDate'] ?? null);
+            $createdDate   = $p['CreatedDate'] ?? ($p['createdDate'] ?? null);
+            $pmId          = (string) ($p['PaymentMethodId'] ?? ($p['paymentMethodId'] ?? ''));
 
-            $gatewayResponse = $p['gatewayResponse'] ?? null;
-            $gatewaySummary  = $this->summariseGateway($gatewayResponse);
+            $gatewayResponse = $p['GatewayResponse'] ?? ($p['gatewayResponse'] ?? null);
 
-            // Dates: effectiveDate is usually best; fall back to createdDate
-            $dateIso = $this->toIsoDate($p['effectiveDate'] ?? null)
-                ?: $this->toIsoDate($p['createdDate'] ?? null);
+            $pm = ($pmId && isset($pmById[$pmId])) ? $pmById[$pmId] : null;
+
+            $dateIso = $this->toIsoDate($effectiveDate) ?: $this->toIsoDate($createdDate);
 
             $result[] = [
-                'payment'    => $p['paymentNumber'] ?? ($p['id'] ?? null),
+                'payment'    => $paymentNumber,
                 'cardholder' => $this->pickCardholderName($pm),
-                'amount'     => $p['amount'] ?? null,
-                'gateway'    => $gatewaySummary,
-                'status'     => $p['status'] ?? null,
+                'amount'     => $amount,
+                'gateway'    => $this->summariseGateway($gatewayResponse),
+                'status'     => $status,
                 'dateIso'    => $dateIso,
-
                 'method'     => $this->formatPaymentMethodLabel($pm),
                 'expiration' => $this->formatCardExpiry($pm),
 
-                // debug/internal (optional)
-                'zuoraPaymentId'       => $p['id'] ?? null,
+                // internal/debug
+                'zuoraPaymentId'       => $p['Id'] ?? ($p['id'] ?? null),
                 'zuoraPaymentMethodId' => $pmId ?: null,
             ];
         }
@@ -217,28 +246,18 @@ class ZuoraPayment extends \Espo\Core\Controllers\Base
         ];
     }
 
-    /**
-     * Resolve Zuora Account ID from Account.cZuoraAccountId.
-     */
     protected function resolveZuoraAccountIdFromAccount($accountId)
     {
-        if (!$accountId) {
-            return null;
-        }
+        if (!$accountId) return null;
 
         $entityManager = $this->getEntityManager();
         $account       = $entityManager->getEntity('Account', $accountId);
 
-        if (!$account) {
-            return null;
-        }
+        if (!$account) return null;
 
         return $account->get('cZuoraAccountId') ?: null;
     }
 
-    /**
-     * Zuora request helper - captures status/body/curl errors (no token leakage).
-     */
     protected function zuoraRequest(string $method, string $url, string $accessToken, ?array $body = null): array
     {
         $headers = [
@@ -279,55 +298,37 @@ class ZuoraPayment extends \Espo\Core\Controllers\Base
         ];
     }
 
-    /**
-     * Espo logger helper (safe).
-     */
     protected function logDebug(string $message, array $context = []): void
     {
         try {
             $logger = $this->getContainer()->get('logger');
             $logger->info('[ZuoraPayment] ' . $message . ' ' . json_encode($context));
         } catch (\Throwable $e) {
-            // never break API for logging
+            // swallow
         }
     }
 
-    /**
-     * Convert various Zuora date formats to ISO-like YYYY-MM-DD (or null).
-     */
     protected function toIsoDate($value): ?string
     {
-        if (!$value) {
-            return null;
-        }
+        if (!$value) return null;
 
         if (is_string($value)) {
-            // already yyyy-mm-dd?
             if (preg_match('/^(\d{4})-(\d{2})-(\d{2})/', $value, $m)) {
                 return $m[1] . '-' . $m[2] . '-' . $m[3];
             }
-            return $value; // last resort
+            return $value;
         }
 
         return null;
     }
 
-    /**
-     * Summarise gateway response in a human-friendly string.
-     */
     protected function summariseGateway($gatewayResponse): ?string
     {
-        if ($gatewayResponse === null) {
-            return null;
-        }
+        if ($gatewayResponse === null) return null;
 
-        if (is_string($gatewayResponse)) {
-            return $gatewayResponse;
-        }
+        if (is_string($gatewayResponse)) return $gatewayResponse;
 
-        if (!is_array($gatewayResponse)) {
-            return null;
-        }
+        if (!is_array($gatewayResponse)) return null;
 
         $bits = [];
 
@@ -342,7 +343,6 @@ class ZuoraPayment extends \Espo\Core\Controllers\Base
         }
 
         if (empty($bits)) {
-            // last resort: JSON snippet
             $raw = json_encode($gatewayResponse);
             return $raw ? mb_substr($raw, 0, 300) : null;
         }
@@ -350,16 +350,10 @@ class ZuoraPayment extends \Espo\Core\Controllers\Base
         return implode(' - ', $bits);
     }
 
-    /**
-     * Pick a cardholder / holder name from payment method response.
-     */
     protected function pickCardholderName($pm): ?string
     {
-        if (!is_array($pm)) {
-            return null;
-        }
+        if (!is_array($pm)) return null;
 
-        // Common keys across Zuora PM shapes
         foreach (['creditCardHolderName', 'cardHolderName', 'holderName', 'name'] as $k) {
             if (!empty($pm[$k]) && is_string($pm[$k])) {
                 return $pm[$k];
@@ -369,16 +363,10 @@ class ZuoraPayment extends \Espo\Core\Controllers\Base
         return null;
     }
 
-    /**
-     * Format payment method label: e.g. "Visa •••• 1234" or "Direct Debit".
-     */
     protected function formatPaymentMethodLabel($pm): ?string
     {
-        if (!is_array($pm)) {
-            return null;
-        }
+        if (!is_array($pm)) return null;
 
-        // Credit card style
         $type = $pm['type'] ?? $pm['paymentMethodType'] ?? null;
 
         $cardType = $pm['creditCardType'] ?? null;
@@ -387,7 +375,6 @@ class ZuoraPayment extends \Espo\Core\Controllers\Base
         if ($cardType || $last4) {
             $t = $cardType ?: 'Card';
             if (is_string($last4)) {
-                // keep last 4 digits if mask contains more
                 $digits = preg_replace('/\D+/', '', $last4);
                 if ($digits && strlen($digits) >= 4) {
                     $last4 = substr($digits, -4);
@@ -396,7 +383,6 @@ class ZuoraPayment extends \Espo\Core\Controllers\Base
             return trim($t . ' •••• ' . (string) $last4);
         }
 
-        // Non-card methods
         if (is_string($type) && $type !== '') {
             return $type;
         }
@@ -404,14 +390,9 @@ class ZuoraPayment extends \Espo\Core\Controllers\Base
         return null;
     }
 
-    /**
-     * Format expiry as MM/YYYY if present.
-     */
     protected function formatCardExpiry($pm): ?string
     {
-        if (!is_array($pm)) {
-            return null;
-        }
+        if (!is_array($pm)) return null;
 
         $month = $pm['creditCardExpirationMonth'] ?? $pm['expirationMonth'] ?? null;
         $year  = $pm['creditCardExpirationYear'] ?? $pm['expirationYear'] ?? null;
@@ -421,7 +402,6 @@ class ZuoraPayment extends \Espo\Core\Controllers\Base
             return $m . '/' . (string) $year;
         }
 
-        // Sometimes it's a combined field
         $expiry = $pm['creditCardExpirationDate'] ?? $pm['expirationDate'] ?? null;
         if (is_string($expiry) && $expiry !== '') {
             return $expiry;
@@ -430,9 +410,6 @@ class ZuoraPayment extends \Espo\Core\Controllers\Base
         return null;
     }
 
-    /**
-     * Get Zuora access token via client_credentials.
-     */
     protected function getZuoraAccessToken()
     {
         $config       = $this->getConfig();
@@ -462,17 +439,17 @@ class ZuoraPayment extends \Espo\Core\Controllers\Base
             CURLOPT_TIMEOUT        => 30,
         ]);
 
-        $raw   = curl_exec($ch);
-        $errno = curl_errno($ch);
-        $err   = curl_error($ch);
-        $status= curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $raw    = curl_exec($ch);
+        $errno  = curl_errno($ch);
+        $errMsg = curl_error($ch);
+        $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
         if ($errno !== 0 || $raw === false || $status >= 400) {
             $this->logDebug('Zuora token fetch failed', [
                 'httpStatus' => $status,
                 'curlErrNo'  => $errno,
-                'curlError'  => $err,
+                'curlError'  => $errMsg,
             ]);
             return null;
         }
@@ -488,17 +465,11 @@ class ZuoraPayment extends \Espo\Core\Controllers\Base
         return $data['access_token'];
     }
 
-    /**
-     * Helper: get entity manager from DI.
-     */
     protected function getEntityManager()
     {
         return $this->getContainer()->get('entityManager');
     }
 
-    /**
-     * Helper: get config service.
-     */
     protected function getConfig()
     {
         return $this->getContainer()->get('config');
