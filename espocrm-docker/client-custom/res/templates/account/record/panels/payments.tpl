@@ -1,3 +1,4 @@
+{{!-- Action buttons --}}
 <div class="pull-right" style="margin-bottom: 10px; text-align: right;">
     <button
         type="button"
@@ -19,35 +20,39 @@
 
 {{#unless loading}}
     {{#unless error}}
+
         {{#if payments.length}}
             <table class="table table-panel">
                 <thead>
                     <tr>
-                        <th style="width: 12%;">Payment</th>
-                        <th style="width: 16%;">Cardholder</th>
+                        <th style="width: 14%;">Payment</th>
+                        <th style="width: 18%;">Cardholder</th>
                         <th style="width: 10%;">Amount</th>
-                        <th style="width: 18%;">Gateway</th>
-                        <th style="width: 10%;">Status</th>
-                        <th style="width: 12%;">Date</th>
-                        <th style="width: 16%;">Method</th>
-                        <th style="width: 6%;">Expiration</th>
+                        <th style="width: 14%;">Gateway</th>
+                        <th style="width: 12%;">Status</th>
+                        <th style="width: 14%;">Date</th>
+                        <th style="width: 10%;">Method</th>
+                        <th style="width: 8%;">Exp</th>
                     </tr>
                 </thead>
+
                 <tbody>
                     {{#each payments}}
                         <tr>
                             <td>{{payment}}</td>
                             <td>{{cardholder}}</td>
-                            <td>{{amount}}</td>
-                            <td title="{{gateway}}">{{gateway}}</td>
+                            <td>{{displayAmount}}</td>
+                            <td>{{gateway}}</td>
+
                             <td>
-                                {{#if (eq status "Processed")}}
-                                    <span class="label label-success">{{status}}</span>
+                                {{#if statusText}}
+                                    <span class="{{statusClass}}">{{statusText}}</span>
                                 {{else}}
-                                    <span class="label label-default">{{status}}</span>
+                                    <span class="label label-default">-</span>
                                 {{/if}}
                             </td>
-                            <td>{{dateIso}}</td>
+
+                            <td>{{displayDate}}</td>
                             <td>{{method}}</td>
                             <td>{{expiration}}</td>
                         </tr>
@@ -57,5 +62,6 @@
         {{else}}
             <div class="text-muted">No payments found for this account.</div>
         {{/if}}
+
     {{/unless}}
 {{/unless}}
