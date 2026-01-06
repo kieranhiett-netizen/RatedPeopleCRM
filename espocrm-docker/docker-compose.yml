@@ -1,5 +1,4 @@
 services:
-
   espocrm-db:
     image: mariadb:latest
     container_name: espocrm-db
@@ -12,7 +11,7 @@ services:
       - espocrm-db:/var/lib/mysql
     restart: always
     ports:
-      - "3306:3306"
+      - "127.0.0.1:3306:3306"
 
   espocrm:
     image: espocrm/espocrm
@@ -26,31 +25,15 @@ services:
       ESPOCRM_DATABASE_PASSWORD: database_password
       ESPOCRM_ADMIN_USERNAME: admin
       ESPOCRM_ADMIN_PASSWORD: password
-      ESPOCRM_SITE_URL: "https://ratedpeople.duckdns.org"
+      ESPOCRM_SITE_URL: "http://localhost:8080"
     volumes:
       - espocrm:/var/www/html
       - ./custom/Espo:/var/www/html/custom/Espo
       - ./client-custom:/var/www/html/client/custom
     restart: always
-    expose:
-      - "80"
-
-  caddy:
-    image: caddy:latest
-    container_name: caddy
-    depends_on:
-      - espocrm
-    restart: always
     ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
-      - caddy_data:/data
-      - caddy_config:/config
+      - "127.0.0.1:8080:80"
 
 volumes:
   espocrm-db:
   espocrm:
-  caddy_data:
-  caddy_config:
